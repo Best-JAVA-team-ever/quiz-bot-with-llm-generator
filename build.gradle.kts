@@ -1,45 +1,36 @@
 plugins {
     java
-    application
-    id("com.gradleup.shadow") version "8.3.5"
 }
 
-group = "com.quizbot"
-version = "0.0.1-SNAPSHOT"
+allprojects {
+    group = "com.quizbot"
+    version = "1.0.0-RELEASE"
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+    repositories {
+        mavenCentral()
     }
 }
 
-application {
-    mainClass.set("com.quizbot.QuizBotApplication")
-}
+subprojects {
+    apply(plugin = "java")
 
-repositories {
-    mavenCentral()
-    maven { url = uri("https://repo.spring.io/milestone") }
-}
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(25))
+        }
+    }
 
-dependencies {
-    // Spring Framework 7
-    implementation(platform("org.springframework:spring-framework-bom:7.0.0"))
-    implementation("org.springframework:spring-context")
-    implementation("org.springframework:spring-webflux")
-    implementation("org.springframework:spring-web")
+    val springVersion = "7.0.0"
 
-    // Spring Data MongoDB 
-    implementation(platform("org.springframework.data:spring-data-bom:2025.0.0"))
-    implementation("org.springframework.data:spring-data-mongodb")
+    dependencies {
+        implementation("org.springframework:spring-context:$springVersion")
+        implementation("org.slf4j:slf4j-api:2.0.16")
+        
+        testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
+        testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
+    }
 
-    // Reactor Netty — embedded HTTP server
-    implementation("io.projectreactor.netty:reactor-netty-http:1.2.6")
-
-    // MongoDB reactive driver
-    implementation("org.mongodb:mongodb-driver-reactivestreams:5.4.0")
-}
-
-tasks.withType<Test> {
-    useJUnitPlatform()
+    tasks.withType<Test> {
+        useJUnitPlatform()
+    }
 }
