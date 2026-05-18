@@ -11,7 +11,7 @@ public record Question(
     String correctAnswer,
     List<String> incorrectAnswers,
     Integer difficulty,
-    List<String> topicIds,
+    List<String> topicNames,
     String explanation,
     String hint
 ) {}

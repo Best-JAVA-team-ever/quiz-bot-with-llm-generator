@@ -1,16 +1,20 @@
 package com.quizbot.app;
 
-import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee10.servlet.ServletHolder;
-import org.eclipse.jetty.server.Server;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
+import org.springframework.http.server.reactive.HttpHandler;
+import org.springframework.http.server.reactive.ReactorHttpHandlerAdapter;
 import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
-import org.springframework.web.servlet.DispatcherServlet;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.web.reactive.config.EnableWebFlux;
+import org.springframework.web.server.adapter.WebHttpHandlerBuilder;
+import reactor.netty.http.server.HttpServer;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -18,32 +22,40 @@ import java.util.concurrent.Executors;
 @Configuration
 @ComponentScan(basePackages = "com.quizbot")
 @EnableScheduling
+@EnableWebFlux
 @PropertySource("classpath:application.properties")
 public class QuizBotApplication {
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
         // Start Spring Context
         AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(QuizBotApplication.class);
         context.registerShutdownHook();
 
-        // Manual Jetty Start for Spring 7 MVC
-        Server server = new Server(8080);
-        ServletContextHandler handler = new ServletContextHandler(ServletContextHandler.SESSIONS);
-        handler.setContextPath("/");
-        server.setHandler(handler);
+        // Manual Reactor Netty Start for Spring 7 WebFlux
+        HttpHandler httpHandler = WebHttpHandlerBuilder.applicationContext(context).build();
+        ReactorHttpHandlerAdapter adapter = new ReactorHttpHandlerAdapter(httpHandler);
 
-        // Link DispatcherServlet to the Spring Context
-        DispatcherServlet dispatcherServlet = new DispatcherServlet();
-        AnnotationConfigWebApplicationContext webContext = new AnnotationConfigWebApplicationContext();
-        webContext.setParent(context);
-        webContext.register(QuizBotApplication.class);
-        dispatcherServlet.setApplicationContext(webContext);
+        int port = context.getEnvironment().getProperty("server.port", Integer.class, 8080);
 
-        handler.addServlet(new ServletHolder(dispatcherServlet), "/");
+        HttpServer.create()
+                .port(port)
+                .handle(adapter)
+                .bindNow()
+                .onDispose()
+                .block();
+    }
 
-        server.start();
-        System.out.println("Quiz Bot [Spring 7 + Java 25] is running on http://localhost:8080");
-        server.join();
+    @Bean
+    public MeterRegistry meterRegistry() {
+        return new SimpleMeterRegistry();
+    }
+
+    @Bean
+    public ThreadPoolTaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(5);
+        scheduler.setThreadNamePrefix("QuizScheduler-");
+        return scheduler;
     }
 
     @Bean
