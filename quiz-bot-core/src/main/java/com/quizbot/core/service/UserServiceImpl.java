@@ -46,8 +46,8 @@ public class UserServiceImpl implements UserService {
         return usersRepository.findByTelegramId(telegramId)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
                 .flatMap(user -> {
-                    user.withRole(Role.ADMIN);
-                    return usersRepository.save(user);
+                    Users upgraded = user.withRole(Role.ADMIN);
+                    return usersRepository.save(upgraded);
                 })
                 .flatMap(user -> auditLogService
                         .log(String.valueOf(telegramId), "UPGRADE_TO_ADMIN",
@@ -72,8 +72,8 @@ public class UserServiceImpl implements UserService {
         return usersRepository.findByIdAndDeletedAtIsNull(targetUserId)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
                 .flatMap(user -> {
-                    user.withRole(Role.ADMIN);
-                    return usersRepository.save(user);
+                    Users upgraded = user.withRole(Role.ADMIN);
+                    return usersRepository.save(upgraded);
                 })
                 .flatMap(user -> auditLogService
                         .log(initiatorId, "UPGRADE_TO_ADMIN", "users", user.id())
@@ -84,8 +84,8 @@ public class UserServiceImpl implements UserService {
         return usersRepository.findByIdAndDeletedAtIsNull(userId)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
                 .flatMap(user -> {
-                    user.withScoreResetAt(Instant.now());
-                    return usersRepository.save(user);
+                    Users updated = user.withScoreResetAt(Instant.now());
+                    return usersRepository.save(updated);
                 });
     }
 

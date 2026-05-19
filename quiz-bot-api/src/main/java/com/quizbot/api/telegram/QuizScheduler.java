@@ -66,7 +66,7 @@ public class QuizScheduler {
     public void runMonthlyDifficultyUpdate() {
         log.info("Starting monthly adaptive difficulty update...");
         statisticsService.getQuestionsWithStats().collectList().subscribe(stats -> {
-            llmClient.suggestDifficultyUpdates(stats).thenAccept(updates -> {
+            llmClient.suggestDifficultyUpdates(stats).subscribe(updates -> {
                 for (var update : updates) {
                     questionService.getQuestionById(update.questionId()).subscribe(q -> {
                         if (q != null && q.difficulty() != update.newDifficulty()) {

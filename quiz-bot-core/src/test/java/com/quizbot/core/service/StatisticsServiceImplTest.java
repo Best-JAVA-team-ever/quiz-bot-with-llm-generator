@@ -1,9 +1,12 @@
 package com.quizbot.core.service;
 
-import com.quizbot.core.domain.Answer;
+import com.quizbot.core.domain.Answers;
 import com.quizbot.core.domain.Group;
+import com.quizbot.core.domain.GroupMember;
 import com.quizbot.core.domain.Question;
-import com.quizbot.core.repository.AnswerRepository;
+import com.quizbot.core.domain.Users;
+import com.quizbot.core.repository.AnswersRepository;
+import com.quizbot.core.repository.GroupMemberRepository;
 import com.quizbot.core.repository.GroupRepository;
 import com.quizbot.core.repository.QuestionRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,36 +18,44 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import java.time.LocalDateTime;
-import java.util.HashSet;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class StatisticsServiceImplTest {
 
     @Mock
-    private AnswerRepository answerRepository;
+    private AnswersRepository answersRepository;
     @Mock
     private QuestionRepository questionRepository;
     @Mock
     private GroupRepository groupRepository;
+    @Mock
+    private GroupMemberRepository groupMemberRepository;
+    @Mock
+    private UserServiceImpl userService;
 
     private StatisticsServiceImpl statisticsService;
 
     @BeforeEach
     void setUp() {
-        statisticsService = new StatisticsServiceImpl(answerRepository, questionRepository, groupRepository);
+        statisticsService = new StatisticsServiceImpl(answersRepository, questionRepository, groupRepository, groupMemberRepository, userService);
     }
 
     @Test
     void getUserStats_shouldCalculateGlobalStats() {
-        Answer correct = new Answer("1", "q1", 1L, "A", true, LocalDateTime.now());
-        Answer incorrect = new Answer("2", "q2", 1L, "B", false, LocalDateTime.now());
-        when(answerRepository.findByUserId(1L)).thenReturn(Flux.just(correct, incorrect));
+        Users user = Users.create(1L, null);
+        Answers correct = Answers.create("1", "q1", "A", true);
+        Answers incorrect = Answers.create("1", "q2", "B", false);
+
+        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class)))
+                .thenReturn(Flux.just(correct, incorrect));
 
         StepVerifier.create(statisticsService.getUserStats(1L, null))
                 .expectNextMatches(stats ->
@@ -58,7 +69,11 @@ class StatisticsServiceImplTest {
 
     @Test
     void getUserStats_shouldReturnZeroPercentage_whenNoAnswers() {
-        when(answerRepository.findByUserId(1L)).thenReturn(Flux.empty());
+        Users user = Users.create(1L, null);
+
+        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class)))
+                .thenReturn(Flux.empty());
 
         StepVerifier.create(statisticsService.getUserStats(1L, null))
                 .expectNextMatches(stats ->
@@ -70,12 +85,14 @@ class StatisticsServiceImplTest {
 
     @Test
     void getUserStats_shouldFilterByTopic() {
-        Question q1 = new Question("q1", "Q1", "A", List.of(), 1, List.of("Math"), null, null);
-        Answer mathAnswer = new Answer("1", "q1", 1L, "A", true, LocalDateTime.now());
-        Answer otherAnswer = new Answer("2", "q2", 1L, "B", false, LocalDateTime.now());
+        Users user = Users.create(1L, null);
+        Question q1 = new Question("q1", "Q1", "A", List.of(), 1, null, null, List.of("Math"), Instant.now(), Instant.now(), null);
+        Answers mathAnswer = Answers.create("1", "q1", "A", true);
 
-        when(answerRepository.findByUserId(1L)).thenReturn(Flux.just(mathAnswer, otherAnswer));
-        when(questionRepository.findByTopicNamesContaining("Math")).thenReturn(Flux.just(q1));
+        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(questionRepository.findAllByTopicNamesContainingAndDeletedAtIsNull("Math")).thenReturn(Flux.just(q1));
+        when(answersRepository.findAllByUserIdAndQuestionIdInAndAnsweredAtAfter(eq("1"), any(List.class), any(Instant.class)))
+                .thenReturn(Flux.just(mathAnswer));
 
         StepVerifier.create(statisticsService.getUserStats(1L, "Math"))
                 .expectNextMatches(stats ->
@@ -88,13 +105,15 @@ class StatisticsServiceImplTest {
 
     @Test
     void getGroupStats_shouldAggregateAllMemberAnswers() {
-        Group group = new Group("g1", "Group1", "link", new HashSet<>(Set.of(1L, 2L)));
-        Answer a1 = new Answer("1", "q1", 1L, "A", true, LocalDateTime.now());
-        Answer a2 = new Answer("2", "q2", 2L, "B", false, LocalDateTime.now());
+        Group group = new Group("g1", "Group1", "link", null, Instant.now(), null);
+        GroupMember m1 = new GroupMember("m1", group.id(), "1", Instant.now(), null);
+        GroupMember m2 = new GroupMember("m2", group.id(), "2", Instant.now(), null);
+        Answers a1 = Answers.create("1", "q1", "A", true);
+        Answers a2 = Answers.create("2", "q2", "B", false);
 
-        when(groupRepository.findById("g1")).thenReturn(Mono.just(group));
-        when(answerRepository.findByUserId(1L)).thenReturn(Flux.just(a1));
-        when(answerRepository.findByUserId(2L)).thenReturn(Flux.just(a2));
+        when(groupRepository.findByIdAndDeletedAtIsNull("g1")).thenReturn(Mono.just(group));
+        when(groupMemberRepository.findAllByGroupIdAndDeletedAtIsNull("g1")).thenReturn(Flux.just(m1, m2));
+        when(answersRepository.findAllByUserIdIn(any(List.class))).thenReturn(Flux.just(a1, a2));
 
         StepVerifier.create(statisticsService.getGroupStats("g1"))
                 .expectNextMatches(stats -> (long) stats.get("total") == 2)
@@ -103,7 +122,7 @@ class StatisticsServiceImplTest {
 
     @Test
     void getGroupStats_shouldReturnEmptyMap_whenGroupNotFound() {
-        when(groupRepository.findById("missing")).thenReturn(Mono.empty());
+        when(groupRepository.findByIdAndDeletedAtIsNull("missing")).thenReturn(Mono.empty());
 
         StepVerifier.create(statisticsService.getGroupStats("missing"))
                 .expectNextMatches(Map::isEmpty)
@@ -111,8 +130,8 @@ class StatisticsServiceImplTest {
     }
 
     @Test
-    void resetUserStats_shouldDeleteAnswersByUserId() {
-        when(answerRepository.deleteByUserId(1L)).thenReturn(Mono.empty());
+    void resetUserStats_shouldResetScoreViaUserService() {
+        when(userService.resetScore("1")).thenReturn(Mono.just(Users.create(1L, null)));
 
         StepVerifier.create(statisticsService.resetUserStats(1L))
                 .verifyComplete();

@@ -3,6 +3,8 @@ val springDataVersion = "5.0.0"
 
 dependencies {
     implementation("org.springframework:spring-web:$springVersion")
+    implementation("org.springframework:spring-webflux:$springVersion")
+    implementation("io.projectreactor.netty:reactor-netty-http:1.2.0")
     implementation("org.springframework.data:spring-data-mongodb:$springDataVersion")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.1")
 }

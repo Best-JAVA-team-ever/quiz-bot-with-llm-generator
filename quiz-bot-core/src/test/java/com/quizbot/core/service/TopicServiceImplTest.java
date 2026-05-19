@@ -1,6 +1,7 @@
 package com.quizbot.core.service;
 
 import com.quizbot.core.domain.Topic;
+import com.quizbot.core.repository.QuestionRepository;
 import com.quizbot.core.repository.TopicRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,22 +21,26 @@ class TopicServiceImplTest {
 
     @Mock
     private TopicRepository topicRepository;
+    @Mock
+    private QuestionRepository questionRepository;
+    @Mock
+    private AuditLogService auditLogService;
 
     private TopicServiceImpl topicService;
 
     @BeforeEach
     void setUp() {
-        topicService = new TopicServiceImpl(topicRepository);
+        topicService = new TopicServiceImpl(topicRepository, questionRepository, auditLogService);
     }
 
     @Test
     void addTopic_shouldSaveTopic_whenNameIsValid() {
-        Topic saved = new Topic("1", "Math");
-        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(false));
+        Topic saved = Topic.create("Math");
+        when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.empty());
         when(topicRepository.save(any(Topic.class))).thenReturn(Mono.just(saved));
 
         StepVerifier.create(topicService.addTopic("Math"))
-                .expectNext(saved)
+                .expectNextMatches(t -> t.name().equals("Math"))
                 .verifyComplete();
     }
 
@@ -62,19 +67,23 @@ class TopicServiceImplTest {
 
     @Test
     void addTopic_shouldReturnError_whenTopicAlreadyExists() {
-        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(true));
+        Topic existing = Topic.create("Math");
+        when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.just(existing));
 
         StepVerifier.create(topicService.addTopic("Math"))
-                .expectErrorMatches(e -> e instanceof IllegalArgumentException &&
+                .expectErrorMatches(e -> e instanceof IllegalStateException &&
                         e.getMessage().contains("уже существует"))
                 .verify();
     }
 
     @Test
     void deleteTopic_shouldDeleteFoundTopic() {
-        Topic topic = new Topic("1", "Math");
-        when(topicRepository.findByName("Math")).thenReturn(Mono.just(topic));
-        when(topicRepository.delete(topic)).thenReturn(Mono.empty());
+        Topic topic = Topic.create("Math");
+        Topic deleted = topic.markAsDeleted();
+        
+        when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.just(topic));
+        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull(topic.id())).thenReturn(Mono.just(false));
+        when(topicRepository.save(any(Topic.class))).thenReturn(Mono.just(deleted));
 
         StepVerifier.create(topicService.deleteTopic("Math"))
                 .verifyComplete();
@@ -82,7 +91,8 @@ class TopicServiceImplTest {
 
     @Test
     void exists_shouldDelegateToRepository() {
-        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(true));
+        Topic existing = Topic.create("Math");
+        when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.just(existing));
 
         StepVerifier.create(topicService.exists("Math"))
                 .expectNext(true)

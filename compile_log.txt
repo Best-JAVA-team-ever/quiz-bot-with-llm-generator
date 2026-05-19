@@ -1,0 +1,407 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :quiz-bot-core:compileJava UP-TO-DATE
+> Task :quiz-bot-core:processResources NO-SOURCE
+> Task :quiz-bot-core:classes UP-TO-DATE
+
+> Task :quiz-bot-core:compileTestJava FAILED
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:3: error: cannot find symbol
+import com.quizbot.core.domain.User;
+                              ^
+  symbol:   class User
+  location: package com.quizbot.core.domain
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:4: error: cannot find symbol
+import com.quizbot.core.domain.UserRole;
+                              ^
+  symbol:   class UserRole
+  location: package com.quizbot.core.domain
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:5: error: cannot find symbol
+import com.quizbot.core.repository.UserRepository;
+                                  ^
+  symbol:   class UserRepository
+  location: package com.quizbot.core.repository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:24: error: cannot find symbol
+    private UserRepository userRepository;
+            ^
+  symbol:   class UserRepository
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:32: error: constructor GroupServiceImpl in class GroupServiceImpl cannot be applied to given types;
+        groupService = new GroupServiceImpl(groupRepository);
+                       ^
+  required: GroupRepository,GroupMemberRepository,AuditLogService
+  found:    GroupRepository
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:43: error: cannot find symbol
+                        g.memberIds().isEmpty()
+                         ^
+  symbol:   method memberIds()
+  location: variable g of type Group
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:59: error: constructor Group in record Group cannot be applied to given types;
+        Group group = new Group("g1", "G1", "link", new HashSet<>());
+                      ^
+  required: String,String,String,String,Instant,Instant
+  found:    String,String,String,HashSet<Object>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:66: error: cannot find symbol
+        assertTrue(group.memberIds().contains(42L));
+                        ^
+  symbol:   method memberIds()
+  location: variable group of type Group
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:72: error: constructor Group in record Group cannot be applied to given types;
+        Group group = new Group("g1", "G1", "link", members);
+                      ^
+  required: String,String,String,String,Instant,Instant
+  found:    String,String,String,Set<Long>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:79: error: cannot find symbol
+        assertTrue(group.memberIds().isEmpty());
+                        ^
+  symbol:   method memberIds()
+  location: variable group of type Group
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:84: error: constructor Group in record Group cannot be applied to given types;
+        Group g1 = new Group("g1", "G1", "link1", new HashSet<>(Set.of(1L, 2L)));
+                   ^
+  required: String,String,String,String,Instant,Instant
+  found:    String,String,String,HashSet<Long>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/GroupServiceImplTest.java:85: error: constructor Group in record Group cannot be applied to given types;
+        Group g2 = new Group("g2", "G2", "link2", new HashSet<>(Set.of(3L)));
+                   ^
+  required: String,String,String,String,Instant,Instant
+  found:    String,String,String,HashSet<Long>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:35: error: cannot find symbol
+        User existing = new User(1L, UserRole.USER, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:35: error: cannot find symbol
+        User existing = new User(1L, UserRole.USER, LocalDateTime.now());
+                            ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:35: error: cannot find symbol
+        User existing = new User(1L, UserRole.USER, LocalDateTime.now());
+                                     ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:45: error: cannot find symbol
+        User saved = new User(1L, UserRole.USER, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:45: error: cannot find symbol
+        User saved = new User(1L, UserRole.USER, LocalDateTime.now());
+                         ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:45: error: cannot find symbol
+        User saved = new User(1L, UserRole.USER, LocalDateTime.now());
+                                  ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:47: error: cannot find symbol
+        when(userRepository.save(any(User.class))).thenReturn(Mono.just(saved));
+                                     ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:50: error: cannot find symbol
+                .expectNextMatches(u -> u.role() == UserRole.USER)
+                                                    ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:56: error: cannot find symbol
+        User saved = new User(100L, UserRole.ADMIN, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:56: error: cannot find symbol
+        User saved = new User(100L, UserRole.ADMIN, LocalDateTime.now());
+                         ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:56: error: cannot find symbol
+        User saved = new User(100L, UserRole.ADMIN, LocalDateTime.now());
+                                    ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:58: error: cannot find symbol
+        when(userRepository.save(any(User.class))).thenReturn(Mono.just(saved));
+                                     ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:61: error: cannot find symbol
+                .expectNextMatches(u -> u.role() == UserRole.ADMIN)
+                                                    ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:67: error: cannot find symbol
+        User user = new User(1L, UserRole.USER, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:67: error: cannot find symbol
+        User user = new User(1L, UserRole.USER, LocalDateTime.now());
+                        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:67: error: cannot find symbol
+        User user = new User(1L, UserRole.USER, LocalDateTime.now());
+                                 ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:68: error: cannot find symbol
+        User upgraded = new User(1L, UserRole.ADMIN, user.registrationDate());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:68: error: cannot find symbol
+        User upgraded = new User(1L, UserRole.ADMIN, user.registrationDate());
+                            ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:68: error: cannot find symbol
+        User upgraded = new User(1L, UserRole.ADMIN, user.registrationDate());
+                                     ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:70: error: cannot find symbol
+        when(userRepository.save(any(User.class))).thenReturn(Mono.just(upgraded));
+                                     ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:78: error: cannot find symbol
+        User u1 = new User(1L, UserRole.USER, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:78: error: cannot find symbol
+        User u1 = new User(1L, UserRole.USER, LocalDateTime.now());
+                      ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:78: error: cannot find symbol
+        User u1 = new User(1L, UserRole.USER, LocalDateTime.now());
+                               ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:79: error: cannot find symbol
+        User u2 = new User(2L, UserRole.ADMIN, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:79: error: cannot find symbol
+        User u2 = new User(2L, UserRole.ADMIN, LocalDateTime.now());
+                      ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:79: error: cannot find symbol
+        User u2 = new User(2L, UserRole.ADMIN, LocalDateTime.now());
+                               ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:89: error: cannot find symbol
+        User user = new User(1L, UserRole.USER, LocalDateTime.now());
+        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:89: error: cannot find symbol
+        User user = new User(1L, UserRole.USER, LocalDateTime.now());
+                        ^
+  symbol:   class User
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:89: error: cannot find symbol
+        User user = new User(1L, UserRole.USER, LocalDateTime.now());
+                                 ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:93: error: cannot find symbol
+                .expectNext(UserRole.USER)
+                            ^
+  symbol:   variable UserRole
+  location: class UserServiceImplTest
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/StatisticsServiceImplTest.java:52: error: method create in record Users cannot be applied to given types;
+        Users user = Users.create(1L, "user", null, null);
+                          ^
+  required: Long,Role
+  found:    long,String,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/StatisticsServiceImplTest.java:72: error: method create in record Users cannot be applied to given types;
+        Users user = Users.create(1L, "user", null, null);
+                          ^
+  required: Long,Role
+  found:    long,String,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/StatisticsServiceImplTest.java:88: error: method create in record Users cannot be applied to given types;
+        Users user = Users.create(1L, "user", null, null);
+                          ^
+  required: Long,Role
+  found:    long,String,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/StatisticsServiceImplTest.java:134: error: method create in record Users cannot be applied to given types;
+        when(userService.resetScore("1")).thenReturn(Mono.just(Users.create(1L, "user", null, null)));
+                                                                    ^
+  required: Long,Role
+  found:    long,String,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:28: error: constructor TopicServiceImpl in class TopicServiceImpl cannot be applied to given types;
+        topicService = new TopicServiceImpl(topicRepository);
+                       ^
+  required: TopicRepository,QuestionRepository,AuditLogService
+  found:    TopicRepository
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:33: error: constructor Topic in record Topic cannot be applied to given types;
+        Topic saved = new Topic("1", "Math");
+                      ^
+  required: String,String,Instant,Instant
+  found:    String,String
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:34: error: cannot find symbol
+        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(false));
+                            ^
+  symbol:   method existsByName(String)
+  location: variable topicRepository of type TopicRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:65: error: cannot find symbol
+        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(true));
+                            ^
+  symbol:   method existsByName(String)
+  location: variable topicRepository of type TopicRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:75: error: constructor Topic in record Topic cannot be applied to given types;
+        Topic topic = new Topic("1", "Math");
+                      ^
+  required: String,String,Instant,Instant
+  found:    String,String
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:76: error: cannot find symbol
+        when(topicRepository.findByName("Math")).thenReturn(Mono.just(topic));
+                            ^
+  symbol:   method findByName(String)
+  location: variable topicRepository of type TopicRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/TopicServiceImplTest.java:85: error: cannot find symbol
+        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(true));
+                            ^
+  symbol:   method existsByName(String)
+  location: variable topicRepository of type TopicRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:33: error: constructor QuestionServiceImpl in class QuestionServiceImpl cannot be applied to given types;
+        questionService = new QuestionServiceImpl(questionRepository, topicRepository);
+                          ^
+  required: QuestionRepository,AnswersRepository,AuditLogService
+  found:    QuestionRepository,TopicRepository
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:38: error: constructor Question in record Question cannot be applied to given types;
+        Question q = new Question(null, "Q?", "A", List.of("B"), 1, List.of(), null, null);
+                     ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    <null>,String,String,List<String>,int,List<Object>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:39: error: constructor Question in record Question cannot be applied to given types;
+        Question saved = new Question("id1", "Q?", "A", List.of("B"), 1, List.of(), null, null);
+                         ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<String>,int,List<Object>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:49: error: constructor Question in record Question cannot be applied to given types;
+        Question q = new Question(null, "Q?", "A", List.of("B"), 1, List.of("NewTopic"), null, null);
+                     ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    <null>,String,String,List<String>,int,List<String>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:50: error: constructor Question in record Question cannot be applied to given types;
+        Question saved = new Question("id1", "Q?", "A", List.of("B"), 1, List.of("NewTopic"), null, null);
+                         ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<String>,int,List<String>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:52: error: cannot find symbol
+        when(topicRepository.existsByName("NewTopic")).thenReturn(Mono.just(false));
+                            ^
+  symbol:   method existsByName(String)
+  location: variable topicRepository of type TopicRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:53: error: constructor Topic in record Topic cannot be applied to given types;
+        when(topicRepository.save(any(Topic.class))).thenReturn(Mono.just(new Topic("t1", "NewTopic")));
+                                                                          ^
+  required: String,String,Instant,Instant
+  found:    String,String
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:63: error: constructor Question in record Question cannot be applied to given types;
+        Question q = new Question(null, "Q?", "A", List.of("B"), 1, List.of("Math"), null, null);
+                     ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    <null>,String,String,List<String>,int,List<String>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:64: error: constructor Question in record Question cannot be applied to given types;
+        Question saved = new Question("id1", "Q?", "A", List.of("B"), 1, List.of("Math"), null, null);
+                         ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<String>,int,List<String>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:66: error: cannot find symbol
+        when(topicRepository.existsByName("Math")).thenReturn(Mono.just(true));
+                            ^
+  symbol:   method existsByName(String)
+  location: variable topicRepository of type TopicRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:76: error: constructor Question in record Question cannot be applied to given types;
+        Question q1 = new Question("1", "Q1", "A", List.of(), 1, List.of(), null, null);
+                      ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<Object>,int,List<Object>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:77: error: constructor Question in record Question cannot be applied to given types;
+        Question q2 = new Question("2", "Q2", "B", List.of(), 2, List.of(), null, null);
+                      ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<Object>,int,List<Object>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:87: error: constructor Question in record Question cannot be applied to given types;
+        Question q = new Question("1", "Q1", "A", List.of(), 1, List.of("Math"), null, null);
+                     ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<Object>,int,List<String>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:88: error: cannot find symbol
+        when(questionRepository.findByTopicNamesContaining("Math")).thenReturn(Flux.just(q));
+                               ^
+  symbol:   method findByTopicNamesContaining(String)
+  location: variable questionRepository of type QuestionRepository
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:105: error: constructor Question in record Question cannot be applied to given types;
+        Question updated = new Question("1", "Updated", "A", List.of(), 3, List.of(), null, null);
+                           ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<Object>,int,List<Object>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+/Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/QuestionServiceImplTest.java:115: error: constructor Question in record Question cannot be applied to given types;
+        Question q = new Question("1", "Q1", "A", List.of(), 1, List.of(), null, null);
+                     ^
+  required: String,String,String,List<String>,int,String,String,List<String>,Instant,Instant,Instant
+  found:    String,String,String,List<Object>,int,List<Object>,<null>,<null>
+  reason: actual and formal argument lists differ in length
+Note: /Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/StatisticsServiceImplTest.java uses unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+69 errors
+
+[Incubating] Problems report is available at: file:///Users/user/study/java/quiz-bot-with-llm-generator/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':quiz-bot-core:compileTestJava' (registered by plugin class 'org.gradle.api.plugins.JavaBasePlugin').
+> Compilation failed; see the compiler output below.
+  /Users/user/study/java/quiz-bot-with-llm-generator/quiz-bot-core/src/test/java/com/quizbot/core/service/UserServiceImplTest.java:3: error: cannot find symbol
+  import com.quizbot.core.domain.User;
+                                ^
+    symbol:   class User
+    location: package com.quizbot.core.domain
+  69 errors
+
+* Try:
+> Check your code and dependencies to fix the compilation error(s)
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 11s
+2 actionable tasks: 1 executed, 1 up-to-date

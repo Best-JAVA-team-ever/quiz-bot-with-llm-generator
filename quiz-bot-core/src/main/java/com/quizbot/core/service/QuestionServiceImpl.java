@@ -161,18 +161,33 @@ public class QuestionServiceImpl implements QuestionService {
 
         Instant since = scoreResetAt != null ? scoreResetAt : Instant.EPOCH;
 
-        return answersRepository.findAllByUserIdAndAnsweredAtAfter(userId, since)
-                .map(Answers::questionId)
-                .collect(Collectors.toSet())
-                .flatMap(answeredIds -> pool
-                        .filter(q -> !answeredIds.contains(q.id()))
-                        .collectList()
-                        .flatMap(unanswered -> {
-                            if (unanswered.isEmpty())
-                                return Mono.empty();
-                            Collections.shuffle(unanswered);
-                            return Mono.just(unanswered.get(0));
-                        }));
+        return pool.collectList().flatMap(allQuestions -> {
+            if (allQuestions.isEmpty()) return Mono.empty();
+            return answersRepository.findAllByUserIdAndAnsweredAtAfter(userId, since)
+                .collectList()
+                .flatMap(userAnswers -> {
+                    java.util.List<String> answeredCorrectlyIds = userAnswers.stream()
+                            .filter(Answers::isCorrect)
+                            .map(Answers::questionId)
+                            .collect(Collectors.toList());
+
+                    java.util.Map<String, Instant> lastAnsweredMap = userAnswers.stream()
+                            .collect(Collectors.toMap(Answers::questionId, Answers::answeredAt, (a, b) -> a.isAfter(b) ? a : b));
+
+                    java.util.List<Question> available = allQuestions.stream()
+                            .filter(q -> !answeredCorrectlyIds.contains(q.id()))
+                            .sorted(java.util.Comparator.comparingInt(Question::difficulty)
+                                    .thenComparing(q -> lastAnsweredMap.getOrDefault(q.id(), Instant.EPOCH)))
+                            .collect(Collectors.toList());
+
+                    if (available.isEmpty()) return Mono.empty();
+
+                    int shuffleRange = Math.min(3, available.size());
+                    java.util.List<Question> candidates = new java.util.ArrayList<>(available.subList(0, shuffleRange));
+                    Collections.shuffle(candidates);
+                    return Mono.just(candidates.get(0));
+                });
+        });
     }
 
     public Flux<Question> findAllForDifficultyUpdate() {

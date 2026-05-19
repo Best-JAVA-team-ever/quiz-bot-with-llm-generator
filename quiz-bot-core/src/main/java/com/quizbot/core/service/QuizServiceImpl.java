@@ -55,21 +55,19 @@ public class QuizServiceImpl implements QuizService {
                                                                                                 userIdStr, since)
                                                                                 .collectList()
                                                                                 .flatMap(userAnswers -> {
-                                                                                        List<String> answeredIds = userAnswers
-                                                                                                        .stream()
+                                                                                        List<String> answeredCorrectlyIds = userAnswers.stream()
                                                                                                         .filter(Answers::isCorrect)
                                                                                                         .map(Answers::questionId)
-                                                                                                        .collect(Collectors
-                                                                                                                        .toList());
+                                                                                                        .collect(Collectors.toList());
 
-                                                                                        List<Question> available = allQuestions
-                                                                                                        .stream()
-                                                                                                        .filter(q -> !answeredIds
-                                                                                                                        .contains(q.id()))
-                                                                                                        .sorted(Comparator
-                                                                                                                        .comparingInt(Question::difficulty))
-                                                                                                        .collect(Collectors
-                                                                                                                        .toList());
+                                                                                        java.util.Map<String, Instant> lastAnsweredMap = userAnswers.stream()
+                                                                                                        .collect(Collectors.toMap(Answers::questionId, Answers::answeredAt, (a, b) -> a.isAfter(b) ? a : b));
+
+                                                                                        List<Question> available = allQuestions.stream()
+                                                                                                        .filter(q -> !answeredCorrectlyIds.contains(q.id()))
+                                                                                                        .sorted(Comparator.comparingInt(Question::difficulty)
+                                                                                                                .thenComparing(q -> lastAnsweredMap.getOrDefault(q.id(), Instant.EPOCH)))
+                                                                                                        .collect(Collectors.toList());
 
                                                                                         if (available.isEmpty())
                                                                                                 return Mono.empty();

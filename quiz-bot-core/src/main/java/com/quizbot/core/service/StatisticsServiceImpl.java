@@ -4,6 +4,7 @@ import com.quizbot.core.domain.Answers;
 import com.quizbot.core.domain.Question;
 import com.quizbot.core.llm.LlmClient;
 import com.quizbot.core.repository.AnswersRepository;
+import com.quizbot.core.repository.GroupMemberRepository;
 import com.quizbot.core.repository.GroupRepository;
 import com.quizbot.core.repository.QuestionRepository;
 import org.springframework.stereotype.Service;
@@ -21,15 +22,18 @@ public class StatisticsServiceImpl implements StatisticsService {
     private final AnswersRepository answersRepository;
     private final QuestionRepository questionRepository;
     private final GroupRepository groupRepository;
+    private final GroupMemberRepository groupMemberRepository;
     private final UserServiceImpl userService;
 
     public StatisticsServiceImpl(AnswersRepository answersRepository,
             QuestionRepository questionRepository,
             GroupRepository groupRepository,
+            GroupMemberRepository groupMemberRepository,
             UserServiceImpl userService) {
         this.answersRepository = answersRepository;
         this.questionRepository = questionRepository;
         this.groupRepository = groupRepository;
+        this.groupMemberRepository = groupMemberRepository;
         this.userService = userService;
     }
 
@@ -69,15 +73,17 @@ public class StatisticsServiceImpl implements StatisticsService {
     @Override
     public Mono<Map<String, Object>> getGroupStats(String groupId) {
         return groupRepository.findByIdAndDeletedAtIsNull(groupId)
-                .flatMap(group -> groupRepository
-                        // переиспользуем GroupMemberRepository через GroupServiceImpl
-                        // здесь просто собираем все ответы из коллекции answers по groupId
-                        // при необходимости заменить на
-                        // GroupMemberRepository.findAllByGroupIdAndDeletedAtIsNull
-                        .findAll().collectList()
-                        .flatMap(groups -> answersRepository.findAll()
-                                .collectList()
-                                .map(StatisticsServiceImpl::calculateStats)))
+                .flatMap(group -> groupMemberRepository.findAllByGroupIdAndDeletedAtIsNull(groupId)
+                        .map(member -> String.valueOf(member.userId()))
+                        .collectList()
+                        .flatMap(userIds -> {
+                            if (userIds.isEmpty()) {
+                                return Mono.just(calculateStats(List.of()));
+                            }
+                            return answersRepository.findAllByUserIdIn(userIds)
+                                    .collectList()
+                                    .map(StatisticsServiceImpl::calculateStats);
+                        }))
                 .defaultIfEmpty(new HashMap<>());
     }
 

@@ -32,7 +32,9 @@ public class GroupServiceImpl implements GroupService {
     }
 
     public Mono<Group> create(String initiatorId, String name) {
-        Group group = Group.create(name, UUID.randomUUID().toString());
+        String inviteId = UUID.randomUUID().toString().substring(0, 8);
+        String inviteLink = "https://t.me/quiz_bot?start=join_" + inviteId;
+        Group group = Group.create(name, inviteLink);
         return groupRepository.save(group)
                 .flatMap(saved -> {
                     if (initiatorId == null) return Mono.just(saved);
@@ -119,7 +121,7 @@ public class GroupServiceImpl implements GroupService {
 
     @Override
     public String generateInviteLink(String groupId) {
-        return UUID.randomUUID().toString();
+        return "https://t.me/quiz_bot?start=join_" + groupId;
     }
 
     public Mono<Void> leave(String userId, String groupId) {

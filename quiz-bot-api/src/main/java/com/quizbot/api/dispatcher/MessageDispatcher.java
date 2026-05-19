@@ -90,7 +90,7 @@ public class MessageDispatcher {
             if (text.startsWith("\\group")) return handleGroup(user, context, text);
             if (text.startsWith("\\get questions")) return handleGetQuestions(user, text);
             if (text.startsWith("\\quiz start")) return startQuiz(userId, context, text);
-            if (text.startsWith("\\score")) return handleScore(userId, text);
+            if (text.startsWith("\\score")) return handleScore(userId, context, text);
             if (text.equalsIgnoreCase("\\help")) return Mono.just(handleHelp(user));
 
             return Mono.just("Неизвестная команда. Введите \\help для списка доступных команд.");
@@ -152,35 +152,39 @@ public class MessageDispatcher {
     }
 
     private Mono<String> performGeneration(ConversationContext context) {
-        return Mono.fromFuture(llmClient.generateQuestion(context.getPendingTopics(), context.getDifficulty()))
+        return llmClient.generateQuestion(context.getPendingTopics(), context.getDifficulty())
+                .timeout(java.time.Duration.ofSeconds(20))
                 .flatMap(q -> {
-                    Mono<String> expMono = Mono.fromFuture(llmClient.generateExplanation(q.text(), q.correctAnswer()));
-                    Mono<String> hintMono = q.difficulty() > 3
-                            ? Mono.fromFuture(llmClient.generateHint(q.text()))
-                            : Mono.just("");
+                    // Делаем запросы последовательно (flatMap вместо zip), чтобы не спамить API
+                    return llmClient.generateExplanation(q.text(), q.correctAnswer())
+                            .flatMap(exp -> {
+                                Mono<String> hintMono = q.difficulty() > 3
+                                        ? llmClient.generateHint(q.text())
+                                        : Mono.just("");
+                                return hintMono.map(hint -> new java.util.AbstractMap.SimpleEntry<>(exp, hint));
+                            })
+                            .flatMap(entry -> {
+                                String exp = entry.getKey();
+                                String hint = entry.getValue();
 
-                    return expMono.zipWith(hintMono, (exp, hint) -> {
-                        // ИСПРАВЛЕНО: был неверный порядок аргументов и отсутствовали временные поля.
-                        // Используем Question.create() — он правильно расставляет createdAt/updatedAt.
-                        // Порядок: text, correctAnswer, wrongAnswers, difficulty, explanation, hint,
-                        // topicNames
-                        Question finalQ = Question.create(
-                                q.text(), q.correctAnswer(), q.wrongAnswers(),
-                                q.difficulty(), exp, hint.isEmpty() ? null : hint,
-                                q.topicNames());
-                        return questionService.addQuestion(finalQ).map(saved -> {
-                            context.reset();
-                            StringBuilder sb = new StringBuilder("Вопрос успешно сгенерирован\n");
-                            sb.append("Вопрос: ").append(saved.text()).append("\n");
-                            sb.append("Правильный ответ: ").append(saved.correctAnswer()).append("\n");
-                            sb.append("Неправильные ответы: ").append(String.join(", ", saved.wrongAnswers()))
-                                    .append("\n");
-                            sb.append("Пояснение: ").append(saved.explanation()).append("\n");
-                            if (saved.hint() != null)
-                                sb.append("Подсказка: ").append(saved.hint());
-                            return sb.toString();
-                        });
-                    }).flatMap(m -> m);
+                                Question finalQ = Question.create(
+                                        q.text(), q.correctAnswer(), q.wrongAnswers(),
+                                        q.difficulty(), exp, hint.isEmpty() ? null : hint,
+                                        q.topicNames());
+
+                                return questionService.addQuestion(finalQ).map(saved -> {
+                                    context.reset();
+                                    StringBuilder sb = new StringBuilder("Вопрос успешно сгенерирован\n");
+                                    sb.append("Вопрос: ").append(saved.text()).append("\n");
+                                    sb.append("Правильный ответ: ").append(saved.correctAnswer()).append("\n");
+                                    sb.append("Неправильные ответы: ").append(String.join(", ", saved.wrongAnswers()))
+                                            .append("\n");
+                                    sb.append("Пояснение: ").append(saved.explanation()).append("\n");
+                                    if (saved.hint() != null)
+                                        sb.append("Подсказка: ").append(saved.hint());
+                                    return sb.toString();
+                                });
+                            });
                 })
                 .onErrorResume(e -> {
                     if (e instanceof java.util.concurrent.TimeoutException) {
@@ -188,7 +192,8 @@ public class MessageDispatcher {
                         return Mono.just(
                                 "Время генерации превысило допустимое значение. Продолжить генерацию? [Да] [Нет]");
                     }
-                    return Mono.just("Генерация прервана по причине: " + e.getMessage());
+                    String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    return Mono.just("Генерация прервана по причине: " + errorMsg);
                 });
     }
 
@@ -327,11 +332,11 @@ public class MessageDispatcher {
         return Mono.just("Использование: \\schedule <set cron|off|status>");
     }
 
-    private Mono<String> handleScore(Long userId, String text) {
+    private Mono<String> handleScore(Long userId, ConversationContext context, String text) {
         String param = text.replace("\\score", "").trim();
 
         if (param.equalsIgnoreCase("reset")) {
-            contexts.get(userId).setState(UserState.AWAITING_SCORE_RESET_CONFIRMATION);
+            context.setState(UserState.AWAITING_SCORE_RESET_CONFIRMATION);
             return Mono.just("Вы уверены? Весь прогресс будет удалён [Да] [Нет]");
         }
 
@@ -433,7 +438,7 @@ public class MessageDispatcher {
         return statisticsService.getQuestionsWithStats().collectList().flatMap(stats -> {
             if (stats.isEmpty())
                 return Mono.just("Нет данных для анализа сложности.");
-            llmClient.suggestDifficultyUpdates(stats).thenAccept(updates -> {
+            llmClient.suggestDifficultyUpdates(stats).subscribe(updates -> {
                 for (var update : updates) {
                     questionService.getQuestionById(update.questionId()).subscribe(q -> {
                         if (q != null && q.difficulty() != update.newDifficulty()) {
@@ -478,7 +483,7 @@ public class MessageDispatcher {
         String params = text.replace("\\add question gen", "").trim();
         if (params.isEmpty())
             return Mono.just("Не было введено название темы");
-        List<String> topics = Arrays.asList(params.split(" "));
+        List<String> topics = new ArrayList<>(Arrays.asList(params.split(" ")));
         for (String t : topics) {
             if (!topicService.isValid(t))
                 return Mono.just(t + " — некорректное название темы");
@@ -591,8 +596,8 @@ public class MessageDispatcher {
                     List<String> incorrectAnswers = new ArrayList<>(context.getIncorrectAnswers());
                     List<String> pendingTopics = context.getPendingTopics();
 
-                    return Mono.fromFuture(llmClient.generateExplanation(qText, correctAns)).zipWith(
-                            difficulty > 3 ? Mono.fromFuture(llmClient.generateHint(qText)) : Mono.just(""))
+                    return llmClient.generateExplanation(qText, correctAns).zipWith(
+                            difficulty > 3 ? llmClient.generateHint(qText) : Mono.just(""))
                             .flatMap(tuple -> {
                                 // ИСПРАВЛЕНО: использован Question.create() вместо конструктора —
                                 // правильный порядок полей и автоматически проставляются createdAt/updatedAt
