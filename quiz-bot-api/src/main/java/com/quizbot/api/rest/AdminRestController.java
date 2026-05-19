@@ -34,7 +34,7 @@ public class AdminRestController {
                     Map<String, Object> map = new HashMap<>();
                     map.put("id", u.telegramId());
                     map.put("role", u.role());
-                    map.put("registrationDate", u.registrationDate().toString());
+                    map.put("registeredAt", u.registeredAt().toString());
                     return map;
                 })
                 .collectList()

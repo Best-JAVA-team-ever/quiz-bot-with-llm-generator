@@ -1,26 +1,30 @@
 package com.quizbot.core.service;
 
-import com.quizbot.core.domain.User;
-import com.quizbot.core.domain.UserRole;
-import com.quizbot.core.repository.UserRepository;
+import com.quizbot.core.domain.Role;
+import com.quizbot.core.domain.Users;
+import com.quizbot.core.repository.UsersRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 public class UserServiceImpl implements UserService {
-    private final UserRepository userRepository;
+
+    private final UsersRepository usersRepository;
+    private final AuditLogService auditLogService;
     private final Set<Long> initialAdminIds;
 
-    public UserServiceImpl(UserRepository userRepository, 
-                           @Value("${admin.chat.ids:}") String adminIds) {
-        this.userRepository = userRepository;
+    public UserServiceImpl(UsersRepository usersRepository,
+            AuditLogService auditLogService,
+            @Value("${admin.chat.ids:}") String adminIds) {
+        this.usersRepository = usersRepository;
+        this.auditLogService = auditLogService;
         this.initialAdminIds = Arrays.stream(adminIds.split(","))
                 .filter(s -> !s.isBlank())
                 .map(String::trim)
@@ -29,28 +33,73 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Mono<User> getOrCreateUser(Long telegramId) {
-        return userRepository.findById(telegramId)
+    public Mono<Users> getOrCreateUser(Long telegramId) {
+        return usersRepository.findByTelegramIdAndDeletedAtIsNull(telegramId)
                 .switchIfEmpty(Mono.defer(() -> {
-                    UserRole role = initialAdminIds.contains(telegramId) ? UserRole.ADMIN : UserRole.USER;
-                    return userRepository.save(new User(telegramId, role, LocalDateTime.now()));
+                    Users newUser = Users.create(telegramId, (initialAdminIds.contains(telegramId) ? Role.ADMIN : Role.USER));
+                    return usersRepository.save(newUser);
                 }));
     }
 
     @Override
     public Mono<Void> upgradeUser(Long telegramId) {
-        return userRepository.findById(telegramId)
-                .flatMap(user -> userRepository.save(new User(user.telegramId(), UserRole.ADMIN, user.registrationDate())))
+        return usersRepository.findByTelegramId(telegramId)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
+                .flatMap(user -> {
+                    user.withRole(Role.ADMIN);
+                    return usersRepository.save(user);
+                })
+                .flatMap(user -> auditLogService
+                        .log(String.valueOf(telegramId), "UPGRADE_TO_ADMIN",
+                                "users", user.id()))
                 .then();
     }
 
     @Override
-    public Flux<User> getAllUsers() {
-        return userRepository.findAll();
+    public Flux<Users> getAllUsers() {
+        return usersRepository.findAllByDeletedAtIsNull();
     }
 
     @Override
-    public Mono<UserRole> getRole(Long telegramId) {
-        return getOrCreateUser(telegramId).map(User::role);
+    public Mono<Role> getRole(Long telegramId) {
+        return getOrCreateUser(telegramId)
+                .map(u -> u.role() == Role.ADMIN ? Role.ADMIN : Role.USER);
+    }
+
+    // --- дополнительные методы, используемые внутри модуля ---
+
+    public Mono<Users> upgradeToAdmin(String initiatorId, String targetUserId) {
+        return usersRepository.findByIdAndDeletedAtIsNull(targetUserId)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
+                .flatMap(user -> {
+                    user.withRole(Role.ADMIN);
+                    return usersRepository.save(user);
+                })
+                .flatMap(user -> auditLogService
+                        .log(initiatorId, "UPGRADE_TO_ADMIN", "users", user.id())
+                        .thenReturn(user));
+    }
+
+    public Mono<Users> resetScore(String userId) {
+        return usersRepository.findByIdAndDeletedAtIsNull(userId)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
+                .flatMap(user -> {
+                    user.withScoreResetAt(Instant.now());
+                    return usersRepository.save(user);
+                });
+    }
+
+    public Mono<Users> findById(String userId) {
+        return usersRepository.findByIdAndDeletedAtIsNull(userId)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")));
+    }
+
+    public Mono<Users> findByTelegramId(Long telegramId) {
+        return usersRepository.findByTelegramIdAndDeletedAtIsNull(telegramId)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")));
+    }
+
+    public Flux<Users> findAllActive() {
+        return usersRepository.findAllByIsActiveTrueAndDeletedAtIsNull();
     }
 }

@@ -69,11 +69,8 @@ public class QuizScheduler {
             llmClient.suggestDifficultyUpdates(stats).thenAccept(updates -> {
                 for (var update : updates) {
                     questionService.getQuestionById(update.questionId()).subscribe(q -> {
-                        if (q != null && !q.difficulty().equals(update.newDifficulty())) {
-                            Question updated = new Question(
-                                q.id(), q.text(), q.correctAnswer(), q.incorrectAnswers(),
-                                update.newDifficulty(), q.topicNames(), q.explanation(), q.hint()
-                            );
+                        if (q != null && q.difficulty() != update.newDifficulty()) {
+                            Question updated = q.withDifficulty(update.newDifficulty());
                             questionService.updateQuestion(updated).subscribe();
                             log.info("Updated difficulty for question {} to {}", q.id(), update.newDifficulty());
                         }
@@ -129,7 +126,7 @@ public class QuizScheduler {
     }
 
     private String formatQuestion(Question q) {
-        List<String> options = new java.util.ArrayList<>(q.incorrectAnswers());
+        List<String> options = new java.util.ArrayList<>(q.wrongAnswers());
         options.add(q.correctAnswer());
         Collections.shuffle(options);
         

@@ -1,14 +1,14 @@
 package com.quizbot.core.service;
 
-import com.quizbot.core.domain.Answer;
+import com.quizbot.core.domain.Answers;
 import com.quizbot.core.domain.Question;
-import com.quizbot.core.repository.AnswerRepository;
+import com.quizbot.core.repository.AnswersRepository;
 import com.quizbot.core.repository.QuestionRepository;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -18,67 +18,85 @@ import java.util.stream.Collectors;
 @Service
 public class QuizServiceImpl implements QuizService {
 
-    private final QuestionRepository questionRepository;
-    private final AnswerRepository answerRepository;
+        private final QuestionRepository questionRepository;
+        private final AnswersRepository answersRepository;
+        private final UserServiceImpl userService;
 
-    public QuizServiceImpl(QuestionRepository questionRepository, AnswerRepository answerRepository) {
-        this.questionRepository = questionRepository;
-        this.answerRepository = answerRepository;
-    }
-
-    @Override
-    public Mono<Question> startQuiz(Long userId, List<String> topics) {
-        Flux<Question> questionsFlux;
-        if (topics == null || topics.isEmpty()) {
-            questionsFlux = questionRepository.findAll();
-        } else {
-            questionsFlux = Flux.fromIterable(topics)
-                    .flatMap(questionRepository::findByTopicNamesContaining)
-                    .distinct();
+        public QuizServiceImpl(QuestionRepository questionRepository,
+                        AnswersRepository answersRepository,
+                        UserServiceImpl userService) {
+                this.questionRepository = questionRepository;
+                this.answersRepository = answersRepository;
+                this.userService = userService;
         }
 
-        return questionsFlux.collectList().flatMap(allQuestions -> {
-            if (allQuestions.isEmpty()) return Mono.empty();
+        @Override
+        public Mono<Question> startQuiz(Long userId, List<String> topics) {
+                String userIdStr = String.valueOf(userId);
 
-            return answerRepository.findByUserId(userId).collectList().flatMap(userAnswers -> {
-                List<String> correctIds = userAnswers.stream()
-                        .filter(Answer::isCorrect)
-                        .map(Answer::questionId)
-                        .collect(Collectors.toList());
+                Flux<Question> questionsFlux = (topics == null || topics.isEmpty())
+                                ? questionRepository.findAllByDeletedAtIsNull()
+                                : questionRepository.findAllByTopicNamesInAndDeletedAtIsNull(topics);
 
-                List<Question> available = allQuestions.stream()
-                        .filter(q -> !correctIds.contains(q.id()))
-                        .collect(Collectors.toList());
+                return userService.findById(userIdStr)
+                                .onErrorResume(e -> userService.getOrCreateUser(userId))
+                                .flatMap(user -> {
+                                        Instant since = user.scoreResetAt() != null
+                                                        ? user.scoreResetAt()
+                                                        : Instant.EPOCH;
 
-                if (available.isEmpty()) return Mono.empty();
+                                        return questionsFlux.collectList()
+                                                        .flatMap(allQuestions -> {
+                                                                if (allQuestions.isEmpty())
+                                                                        return Mono.empty();
 
-                available.sort(Comparator.comparing(Question::difficulty)
-                        .thenComparing(q -> getLastAnswerDate(q.id(), userAnswers)));
+                                                                return answersRepository
+                                                                                .findAllByUserIdAndAnsweredAtAfter(
+                                                                                                userIdStr, since)
+                                                                                .collectList()
+                                                                                .flatMap(userAnswers -> {
+                                                                                        List<String> answeredIds = userAnswers
+                                                                                                        .stream()
+                                                                                                        .filter(Answers::isCorrect)
+                                                                                                        .map(Answers::questionId)
+                                                                                                        .collect(Collectors
+                                                                                                                        .toList());
 
-                int shuffleRange = Math.min(3, available.size());
-                List<Question> candidates = new ArrayList<>(available.subList(0, shuffleRange));
-                Collections.shuffle(candidates);
+                                                                                        List<Question> available = allQuestions
+                                                                                                        .stream()
+                                                                                                        .filter(q -> !answeredIds
+                                                                                                                        .contains(q.id()))
+                                                                                                        .sorted(Comparator
+                                                                                                                        .comparingInt(Question::difficulty))
+                                                                                                        .collect(Collectors
+                                                                                                                        .toList());
 
-                return Mono.just(candidates.get(0));
-            });
-        });
-    }
+                                                                                        if (available.isEmpty())
+                                                                                                return Mono.empty();
 
-    private LocalDateTime getLastAnswerDate(String questionId, List<Answer> answers) {
-        return answers.stream()
-                .filter(a -> a.questionId().equals(questionId))
-                .map(Answer::timestamp)
-                .max(Comparator.naturalOrder())
-                .orElse(LocalDateTime.MIN);
-    }
+                                                                                        int shuffleRange = Math.min(3,
+                                                                                                        available.size());
+                                                                                        List<Question> candidates = new ArrayList<>(
+                                                                                                        available.subList(
+                                                                                                                        0,
+                                                                                                                        shuffleRange));
+                                                                                        Collections.shuffle(candidates);
 
-    @Override
-    public Mono<Boolean> processAnswer(Long userId, String answer) {
-        return Mono.just(false);
-    }
-    
-    @Override
-    public Mono<Void> recordAnswer(Long userId, String questionId, String value, boolean isCorrect) {
-        return answerRepository.save(new Answer(null, questionId, userId, value, isCorrect, LocalDateTime.now())).then();
-    }
+                                                                                        return Mono.just(candidates
+                                                                                                        .get(0));
+                                                                                });
+                                                        });
+                                });
+        }
+
+        @Override
+        public Mono<Boolean> processAnswer(Long userId, String answer) {
+                return Mono.just(false);
+        }
+
+        @Override
+        public Mono<Void> recordAnswer(Long userId, String questionId, String value, boolean isCorrect) {
+                Answers answers = Answers.create(String.valueOf(userId), questionId, value, isCorrect);
+                return answersRepository.save(answers).then();
+        }
 }
