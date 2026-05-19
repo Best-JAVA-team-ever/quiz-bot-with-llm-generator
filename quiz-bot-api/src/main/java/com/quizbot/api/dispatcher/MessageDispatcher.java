@@ -14,8 +14,11 @@ import com.quizbot.core.service.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Mono;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -37,11 +40,12 @@ public class MessageDispatcher {
     private final LlmClient llmClient;
     private final ScheduleService scheduleService;
     private final GroupService groupService;
-    
+    private final TelegramClient telegramClient;
+
     // In-memory state storage (for production, this might need to be in Redis/DB)
     private final Map<Long, ConversationContext> contexts = new HashMap<>();
 
-    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService) {
+    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient) {
         this.userService = userService;
         this.questionService = questionService;
         this.topicService = topicService;
@@ -50,6 +54,7 @@ public class MessageDispatcher {
         this.llmClient = llmClient;
         this.scheduleService = scheduleService;
         this.groupService = groupService;
+        this.telegramClient = telegramClient;
     }
 
     public Mono<String> handleCommand(Long userId, String textIn) {
@@ -79,7 +84,7 @@ public class MessageDispatcher {
             if (text.startsWith("\\update question") && isAdmin) return startUpdateQuestion(context, text);
             if (text.startsWith("\\update difficulty") && isAdmin) return handleUpdateDifficulty();
             if (text.startsWith("\\delete question") && isAdmin) return handleDeleteQuestion(context, text);
-            if (text.startsWith("\\update tag") && isAdmin) return Mono.just(handleUpdateTag(text));
+            if (text.startsWith("\\update tag") && isAdmin) return handleUpdateTag(text);
             if (text.startsWith("\\delete tag") && isAdmin) return handleDeleteTag(text);
             if (text.startsWith("\\schedule") && isAdmin) return handleSchedule(text);
             if (text.startsWith("\\group")) return handleGroup(user, context, text);
@@ -187,7 +192,27 @@ public class MessageDispatcher {
             if (params.startsWith("invite")) {
                 String[] parts = params.replace("invite", "").trim().split(" ");
                 if (parts.length < 2) return Mono.just("Использование: \\group invite <ID группы> <ID пользователя>");
-                return Mono.just("Пользователь приглашен (функционал отправки сообщения в разработке)");
+                String groupId = parts[0];
+                long invitedUserId;
+                try {
+                    invitedUserId = Long.parseLong(parts[1]);
+                } catch (NumberFormatException e) {
+                    return Mono.just("Некорректный ID пользователя");
+                }
+                return groupService.addUserToGroup(groupId, invitedUserId)
+                    .then(groupService.getGroup(groupId))
+                    .map(g -> {
+                        try {
+                            telegramClient.execute(SendMessage.builder()
+                                .chatId(String.valueOf(invitedUserId))
+                                .text("Вы были добавлены в группу «" + g.name() + "»!")
+                                .build());
+                        } catch (TelegramApiException e) {
+                            log.warn("Не удалось уведомить пользователя {}: {}", invitedUserId, e.getMessage());
+                        }
+                        return "Пользователь " + invitedUserId + " добавлен в группу «" + g.name() + "»";
+                    })
+                    .switchIfEmpty(Mono.just("Группа не найдена"));
             }
             if (params.startsWith("exclude")) {
                 String[] parts = params.replace("exclude", "").trim().split(" ");
@@ -328,8 +353,42 @@ public class MessageDispatcher {
         }).switchIfEmpty(Mono.just("Вопрос с таким ID не существует"));
     }
 
-    private String handleUpdateTag(String text) {
-        return "Обновление темы пока в разработке (требует обновления всех связанных вопросов)";
+    private Mono<String> handleUpdateTag(String text) {
+        String params = text.replace("\\update tag", "").trim();
+        String[] parts = params.split(" ", 2);
+        if (parts.length < 2) return Mono.just("Использование: \\update tag <старое_название> <новое_название>");
+
+        String oldName = parts[0].trim();
+        String newName = parts[1].trim();
+
+        if (!topicService.isValid(newName))
+            return Mono.just("Новое название темы «" + newName + "» некорректно");
+
+        return topicService.exists(oldName).flatMap(oldExists -> {
+            if (!oldExists) return Mono.just("Тема «" + oldName + "» не существует");
+
+            return topicService.exists(newName).flatMap(newExists -> {
+                Mono<Void> ensureNewTopic = newExists ? Mono.empty() : topicService.addTopic(newName).then();
+
+                return ensureNewTopic.then(
+                    questionService.getQuestionsByTopic(oldName).collectList().flatMap(questions ->
+                        Flux.fromIterable(questions)
+                            .flatMap(q -> {
+                                List<String> updatedTopics = new ArrayList<>(q.topicNames());
+                                updatedTopics.remove(oldName);
+                                if (!updatedTopics.contains(newName)) updatedTopics.add(newName);
+                                return questionService.updateQuestion(new Question(
+                                    q.id(), q.text(), q.correctAnswer(), q.incorrectAnswers(),
+                                    q.difficulty(), updatedTopics, q.explanation(), q.hint()
+                                ));
+                            })
+                            .then(topicService.deleteTopic(oldName))
+                            .thenReturn("Тема переименована: «" + oldName + "» → «" + newName +
+                                        "» (обновлено вопросов: " + questions.size() + ")")
+                    )
+                );
+            });
+        });
     }
 
     private Mono<String> handleDeleteTag(String text) {

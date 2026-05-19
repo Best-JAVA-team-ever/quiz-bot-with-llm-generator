@@ -1,13 +1,11 @@
 package com.quizbot.api.telegram;
 
 import com.quizbot.api.dispatcher.MessageDispatcher;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
-import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
@@ -17,10 +15,9 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
     private final MessageDispatcher messageDispatcher;
     private final TelegramClient telegramClient;
 
-    public QuizTelegramBot(@Value("${telegram.bot.token}") String botToken,
-                           MessageDispatcher messageDispatcher) {
+    public QuizTelegramBot(TelegramClient telegramClient, MessageDispatcher messageDispatcher) {
         this.messageDispatcher = messageDispatcher;
-        this.telegramClient = new OkHttpTelegramClient(botToken);
+        this.telegramClient = telegramClient;
     }
 
     @Override

@@ -6,56 +6,42 @@ import com.quizbot.core.repository.AnswerRepository;
 import com.quizbot.core.repository.QuestionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
 class QuizServiceImplTest {
 
+    @Mock
+    private QuestionRepository questionRepository;
+    @Mock
+    private AnswerRepository answerRepository;
+
     private QuizServiceImpl quizService;
-    private Flux<Question> mockQuestions;
-    private Flux<Answer> mockAnswers;
 
     @BeforeEach
     void setUp() {
-        QuestionRepository questionRepository = (QuestionRepository) Proxy.newProxyInstance(
-                QuizServiceImplTest.class.getClassLoader(),
-                new Class[]{QuestionRepository.class},
-                (proxy, method, args) -> {
-                    if (method.getName().equals("findAll")) {
-                        return mockQuestions;
-                    }
-                    return null;
-                }
-        );
-
-        AnswerRepository answerRepository = (AnswerRepository) Proxy.newProxyInstance(
-                QuizServiceImplTest.class.getClassLoader(),
-                new Class[]{AnswerRepository.class},
-                (proxy, method, args) -> {
-                    if (method.getName().equals("findByUserId")) {
-                        return mockAnswers;
-                    }
-                    return null;
-                }
-        );
-
         quizService = new QuizServiceImpl(questionRepository, answerRepository);
     }
 
     @Test
     void startQuiz_shouldFilterOutCorrectlyAnsweredQuestions() {
-        Question q1 = new Question("q1", "Question 1", "A", List.of("B", "C"), 1, List.of("Math"), null, null);
-        Question q2 = new Question("q2", "Question 2", "D", List.of("E", "F"), 2, List.of("Math"), null, null);
-
+        Question q1 = new Question("q1", "Q1", "A", List.of("B", "C"), 1, List.of("Math"), null, null);
+        Question q2 = new Question("q2", "Q2", "D", List.of("E", "F"), 2, List.of("Math"), null, null);
         Answer a1 = new Answer("a1", "q1", 1L, "A", true, LocalDateTime.now());
 
-        mockQuestions = Flux.just(q1, q2);
-        mockAnswers = Flux.just(a1);
+        when(questionRepository.findAll()).thenReturn(Flux.just(q1, q2));
+        when(answerRepository.findByUserId(1L)).thenReturn(Flux.just(a1));
 
         StepVerifier.create(quizService.startQuiz(1L, null))
                 .expectNextMatches(q -> q.id().equals("q2"))
@@ -64,16 +50,60 @@ class QuizServiceImplTest {
 
     @Test
     void startQuiz_shouldSortByDifficulty() {
-        Question q1 = new Question("q1", "Hard Question", "A", List.of("B", "C"), 5, List.of("Math"), null, null);
-        Question q2 = new Question("q2", "Easy Question", "D", List.of("E", "F"), 1, List.of("Math"), null, null);
-        Question q3 = new Question("q3", "Medium1", "X", List.of("Y", "Z"), 2, List.of("Math"), null, null);
-        Question q4 = new Question("q4", "Medium2", "X", List.of("Y", "Z"), 3, List.of("Math"), null, null);
+        // 4 questions: 3 easy (difficulty 1) and 1 hard (difficulty 5).
+        // Shuffle picks from top-3 by difficulty (all difficulty 1), so result is always easy.
+        Question easy1 = new Question("q1", "Easy1", "A", List.of("B", "C"), 1, List.of("Math"), null, null);
+        Question easy2 = new Question("q2", "Easy2", "D", List.of("E", "F"), 1, List.of("Math"), null, null);
+        Question easy3 = new Question("q3", "Easy3", "X", List.of("Y", "Z"), 1, List.of("Math"), null, null);
+        Question hard = new Question("q4", "Hard",  "H", List.of("I", "J"), 5, List.of("Math"), null, null);
 
-        mockQuestions = Flux.just(q1, q2, q3, q4);
-        mockAnswers = Flux.empty();
+        when(questionRepository.findAll()).thenReturn(Flux.just(hard, easy1, easy2, easy3));
+        when(answerRepository.findByUserId(1L)).thenReturn(Flux.empty());
 
         StepVerifier.create(quizService.startQuiz(1L, null))
-                .expectNextMatches(q -> q.difficulty() <= 3) 
+                .expectNextMatches(q -> q.difficulty() == 1)
+                .verifyComplete();
+    }
+
+    @Test
+    void startQuiz_shouldReturnEmpty_whenAllQuestionsAnsweredCorrectly() {
+        Question q1 = new Question("q1", "Q1", "A", List.of("B", "C"), 1, List.of("Math"), null, null);
+        Answer a1 = new Answer("a1", "q1", 1L, "A", true, LocalDateTime.now());
+
+        when(questionRepository.findAll()).thenReturn(Flux.just(q1));
+        when(answerRepository.findByUserId(1L)).thenReturn(Flux.just(a1));
+
+        StepVerifier.create(quizService.startQuiz(1L, null))
+                .verifyComplete();
+    }
+
+    @Test
+    void startQuiz_shouldReturnEmpty_whenNoQuestionsExist() {
+        when(questionRepository.findAll()).thenReturn(Flux.empty());
+
+        StepVerifier.create(quizService.startQuiz(1L, null))
+                .verifyComplete();
+    }
+
+    @Test
+    void startQuiz_withTopicFilter_shouldQueryByTopic() {
+        Question q1 = new Question("q1", "Q1", "A", List.of("B", "C"), 1, List.of("Math"), null, null);
+
+        when(questionRepository.findByTopicNamesContaining("Math")).thenReturn(Flux.just(q1));
+        when(answerRepository.findByUserId(1L)).thenReturn(Flux.empty());
+
+        StepVerifier.create(quizService.startQuiz(1L, List.of("Math")))
+                .expectNextMatches(q -> q.id().equals("q1"))
+                .verifyComplete();
+    }
+
+    @Test
+    void recordAnswer_shouldSaveAnswerToRepository() {
+        when(answerRepository.save(any(Answer.class))).thenReturn(Mono.just(
+                new Answer("id", "q1", 1L, "A", true, LocalDateTime.now())
+        ));
+
+        StepVerifier.create(quizService.recordAnswer(1L, "q1", "A", true))
                 .verifyComplete();
     }
 }
