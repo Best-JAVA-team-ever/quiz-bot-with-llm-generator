@@ -29,11 +29,15 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
 
             messageDispatcher.handleCommand(chatId, text)
                 .subscribe(response -> sendText(chatId, response));
-                
+
+        } else if (update.hasMessage()) {
+            long chatId = update.getMessage().getChatId();
+            sendText(chatId, "Некорректный формат сообщения");
+
         } else if (update.hasCallbackQuery()) {
             long chatId = update.getCallbackQuery().getMessage().getChatId();
             String data = update.getCallbackQuery().getData();
-            
+
             messageDispatcher.handleCommand(chatId, data)
                 .subscribe(response -> sendText(chatId, response));
         }

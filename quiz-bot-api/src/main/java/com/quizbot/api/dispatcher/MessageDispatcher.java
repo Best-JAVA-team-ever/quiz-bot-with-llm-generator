@@ -69,6 +69,10 @@ public class MessageDispatcher {
 
         return userService.getOrCreateUser(userId).flatMap(user -> {
             if (context.getState() == UserState.IN_QUIZ) {
+                if (text.startsWith("\\")) {
+                    context.reset();
+                    return Mono.just("Викторина окончена");
+                }
                 return processQuizAnswer(userId, context, text);
             }
             if (context.getState() != UserState.IDLE) {
@@ -102,11 +106,13 @@ public class MessageDispatcher {
         List<String> topics = params.isEmpty() ? List.of() : Arrays.asList(params.split(" "));
 
         return Flux.fromIterable(topics)
-                .flatMap(topicService::exists)
+                .flatMap(t -> topicService.exists(t).map(exists -> new String[]{t, exists.toString()}))
                 .collectList()
                 .flatMap(results -> {
-                    if (results.contains(false))
-                        return Mono.just("Одна из указанных тем не существует");
+                    for (String[] pair : results) {
+                        if (!"true".equals(pair[1]))
+                            return Mono.just("Темы " + pair[0] + " не существует");
+                    }
                     context.setState(UserState.IN_QUIZ);
                     context.setPendingTopics(topics);
                     return nextQuizQuestion(userId, context);
@@ -245,7 +251,10 @@ public class MessageDispatcher {
                 String groupId = params.replace("delete", "").trim();
                 if (groupId.isEmpty())
                     return Mono.just("Использование: \\group delete <ID группы>");
-                return groupService.deleteGroup(groupId).thenReturn("Группа удалена");
+                context.setDeleteScope("group");
+                context.setDeleteValue(groupId);
+                context.setState(UserState.AWAITING_GROUP_DELETE_CONFIRMATION);
+                return Mono.just("Вы уверены? [Да] [Нет]");
             }
             if (params.startsWith("schedule set")) {
                 String[] parts = params.replace("schedule set", "").trim().split(" ", 2);
@@ -266,23 +275,22 @@ public class MessageDispatcher {
                 return scheduleService.disableGroupSchedule(groupId).thenReturn("Групповое расписание отключено");
             }
             if (params.equalsIgnoreCase("list")) {
-                // ИСПРАВЛЕНО: Group не содержит поле memberIds() — участники хранятся в
-                // GroupMember.
-                // GroupService не выставляет подсчёт участников в интерфейсе,
-                // поэтому счётчик убран. Если нужен — добавьте Mono<Long> countMembers(String
-                // groupId)
-                // в GroupService/GroupServiceImpl и используйте flatMap здесь.
                 return groupService.getAllGroups()
-                        .map(g -> g.id() + " " + g.name())
+                        .flatMap(g -> groupService.findMembers(g.id())
+                                .map(m -> "  • " + m.userId())
+                                .collectList()
+                                .map(members -> g.id() + " " + g.name() +
+                                        (members.isEmpty() ? " (нет участников)" :
+                                                "\n" + String.join("\n", members))))
                         .collectList()
-                        .map(l -> l.isEmpty() ? "Групп нет." : String.join("\n", l));
+                        .map(l -> l.isEmpty() ? "Групп нет." : String.join("\n\n", l));
             }
-            if (params.equalsIgnoreCase("score_all")) {
+            if (params.equalsIgnoreCase("score")) {
                 return groupService.getAllGroups()
                         .flatMap(g -> statisticsService.getGroupStats(g.id()).map(stats -> String.format(
                                 "Группа %s: всего %d, верных %d (%.1f%%)",
                                 g.name(), stats.get("total"), stats.get("correct"), stats.get("percentage"))))
-                        .collectList().map(l -> String.join("\n", l));
+                        .collectList().map(l -> l.isEmpty() ? "Групп нет." : String.join("\n", l));
             }
         }
 
@@ -326,7 +334,9 @@ public class MessageDispatcher {
         } else if (params.equalsIgnoreCase("status")) {
             return scheduleService.getGlobalSchedule()
                     .map(s -> String.format("Состояние: %s\nCron: %s\nТема: %s",
-                            s.isActive() ? "активно" : "отключено", s.cronExpression(), s.topicName()))
+                            s.isActive() ? "активно" : "отключено",
+                            s.cronExpression(),
+                            s.topicName() != null ? s.topicName() : "не задана"))
                     .switchIfEmpty(Mono.just("Расписание не задано"));
         }
         return Mono.just("Использование: \\schedule <set cron|off|status>");
@@ -474,7 +484,7 @@ public class MessageDispatcher {
                     context.setState(UserState.AWAITING_CONFIRMATION);
                     return Mono.just("Вы уверены? [Да] [Нет]");
                 }
-                return Mono.just("Вопрос с таким ID или тема не существует");
+                return Mono.just("Данной темы не существует");
             }));
         }
     }
@@ -501,6 +511,17 @@ public class MessageDispatcher {
                     if (diff < 1 || diff > 5)
                         throw new Exception();
                     context.setDifficulty(diff);
+                    String genNotice = "Генерация вопроса по теме(ам) " +
+                            String.join(", ", context.getPendingTopics()) +
+                            " с уровнем сложности " + diff;
+                    try {
+                        telegramClient.execute(SendMessage.builder()
+                                .chatId(String.valueOf(user.telegramId()))
+                                .text(genNotice)
+                                .build());
+                    } catch (TelegramApiException ex) {
+                        log.warn("Не удалось отправить уведомление о генерации: {}", ex.getMessage());
+                    }
                     return performGeneration(context);
                 } catch (Exception e) {
                     return Mono.just("Выберите уровень сложности от 1 до 5");
@@ -510,6 +531,17 @@ public class MessageDispatcher {
                     return performGeneration(context);
                 context.reset();
                 return Mono.just("Генерация прервана");
+            case AWAITING_GROUP_DELETE_CONFIRMATION:
+                if (text.equalsIgnoreCase("Да")) {
+                    String groupId = context.getDeleteValue();
+                    return groupService.deleteGroup(groupId).then(Mono.defer(() -> {
+                        context.reset();
+                        return Mono.just("Группа удалена");
+                    }));
+                } else {
+                    context.reset();
+                    return Mono.just("Удаление отменено");
+                }
             case AWAITING_SCORE_RESET_CONFIRMATION:
                 if (text.equalsIgnoreCase("Да")) {
                     return statisticsService.resetUserStats(user.telegramId()).then(Mono.defer(() -> {
@@ -740,14 +772,15 @@ public class MessageDispatcher {
         if (questions.isEmpty())
             return "Список пуст.";
         return questions.stream()
-                .map(q -> String.format("ID: %s | Сложность: %d | Тема: %s\nQ: %s\nA: %s",
-                        q.id(), q.difficulty(), String.join(", ", q.topicNames()), q.text(), q.correctAnswer()))
+                .map(q -> String.format("ID: %s | Сложность: %d | Тема: %s\nQ: %s\nПравильный: %s\nНеправильные: %s",
+                        q.id(), q.difficulty(), String.join(", ", q.topicNames()),
+                        q.text(), q.correctAnswer(), String.join(", ", q.wrongAnswers())))
                 .collect(Collectors.joining("\n---\n"));
     }
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <старое> <новое>\n\\cancel\n\\group create <название>\n\\group invite <ID> <ID>\n\\group exclude <ID> <ID>\n\\group delete <ID>\n\\group list\n\\group score_all\n\\group schedule set <ID> <cron>\n\\group schedule off <ID>\n\\schedule set <cron>\n\\schedule off\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
+            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <старое_название> <новое_название>\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
         } else {
             return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
         }
