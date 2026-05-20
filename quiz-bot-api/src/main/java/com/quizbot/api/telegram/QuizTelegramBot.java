@@ -57,14 +57,16 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
             InlineKeyboardMarkup markup = (response.keyboard() != null && !response.keyboard().isEmpty())
                     ? createKeyboardMarkup(response.keyboard())
                     : new InlineKeyboardMarkup(new ArrayList<>());
-            EditMessageText edit = EditMessageText.builder()
+            EditMessageText.EditMessageTextBuilder editBuilder = EditMessageText.builder()
                     .chatId(String.valueOf(chatId))
                     .messageId(messageId)
                     .text(response.text())
-                    .replyMarkup(markup)
-                    .build();
+                    .replyMarkup(markup);
+            if (response.text() != null && response.text().contains("<tg-spoiler>")) {
+                editBuilder.parseMode("HTML");
+            }
             try {
-                telegramClient.execute(edit);
+                telegramClient.execute(editBuilder.build());
             } catch (TelegramApiException e) {
                 sendNewMessage(chatId, response);
             }
@@ -74,13 +76,15 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
     }
 
     private void sendNewMessage(long chatId, BotResponse response) {
-        SendMessage sendMessage = SendMessage.builder()
+        SendMessage.SendMessageBuilder builder = SendMessage.builder()
                 .chatId(String.valueOf(chatId))
                 .text(response.text())
-                .replyMarkup(createKeyboardMarkup(response.keyboard()))
-                .build();
+                .replyMarkup(createKeyboardMarkup(response.keyboard()));
+        if (response.text() != null && response.text().contains("<tg-spoiler>")) {
+            builder.parseMode("HTML");
+        }
         try {
-            telegramClient.execute(sendMessage);
+            telegramClient.execute(builder.build());
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }

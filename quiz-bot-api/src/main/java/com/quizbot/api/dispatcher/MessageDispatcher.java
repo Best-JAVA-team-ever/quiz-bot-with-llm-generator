@@ -154,22 +154,34 @@ public class MessageDispatcher {
                     Collections.shuffle(options);
                     context.setCurrentOptions(options);
 
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
-                    sb.append("Вопрос: ").append(q.text()).append("\n\n");
-                    
                     List<List<BotResponse.Button>> keyboard = new ArrayList<>();
                     for (int i = 0; i < options.size(); i++) {
                         keyboard.add(List.of(new BotResponse.Button(options.get(i), "\\ans_" + i)));
                     }
                     keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
 
-                    return Mono.just(BotResponse.buttons(sb.toString(), keyboard));
+                    if (q.hint() != null) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("Темы: ").append(escapeHtml(String.join(", ", q.topicNames()))).append("\n");
+                        sb.append("Вопрос: ").append(escapeHtml(q.text())).append("\n");
+                        sb.append("Подсказка: <tg-spoiler>").append(escapeHtml(q.hint())).append("</tg-spoiler>\n\n");
+                        return Mono.just(BotResponse.buttons(sb.toString(), keyboard));
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
+                        sb.append("Вопрос: ").append(q.text()).append("\n\n");
+                        return Mono.just(BotResponse.buttons(sb.toString(), keyboard));
+                    }
                 })
                 .switchIfEmpty(Mono.defer(() -> {
                     context.reset();
                     return Mono.just(BotResponse.text("Нет неотвеченных вопросов"));
                 }));
+    }
+
+    private static String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private Mono<BotResponse> processQuizAnswer(Long userId, ConversationContext context, String textIn) {
@@ -275,8 +287,8 @@ public class MessageDispatcher {
                 String name = params.replace("create", "").trim();
                 if (name.isEmpty())
                     return Mono.just(BotResponse.text("Использование: \\group create <название>"));
-                return groupService.createGroup(name).map(g -> BotResponse.text(String.format(
-                        "Группа %s %s создана\nСсылка: %s", g.id(), g.name(), g.inviteLink())));
+                return groupService.createGroup(name).map(g -> BotResponse.text(
+                        "Группа " + g.id() + " " + g.name() + " создана"));
             }
             if (params.startsWith("invite")) {
                 String[] parts = params.replace("invite", "").trim().split(" ");
@@ -539,12 +551,12 @@ public class MessageDispatcher {
         String params = text.replace("\\update tag", "").trim();
         String[] parts = params.split(" ", 2);
         if (parts.length < 2 || parts[0].isBlank() || parts[1].isBlank()) {
-            return Mono.just("Использование: \\update tag <ID> <новое_название>");
+            return Mono.just("Использование: \\update tag <старое_название> <новое_название>");
         }
-        String topicId = parts[0].trim();
+        String oldName = parts[0].trim();
         String newName = parts[1].trim();
-        return topicService.rename(String.valueOf(userId), topicId, newName)
-                .map(t -> "Тема с ID \"" + topicId + "\" успешно обновлена. Новое название: \"" + newName + "\"")
+        return topicService.rename(String.valueOf(userId), oldName, newName)
+                .map(t -> "Тема \"" + oldName + "\" переименована в \"" + newName + "\"")
                 .onErrorResume(e -> Mono.just("Ошибка: " + e.getMessage()));
     }
 
@@ -572,8 +584,20 @@ public class MessageDispatcher {
                                     if (q.difficulty() == update.newDifficulty())
                                         return Mono.just("");
                                     int oldDiff = q.difficulty();
-                                    return questionService.updateQuestion(q.withDifficulty(update.newDifficulty()))
-                                            .map(saved -> String.format("ID: %s | %d → %d", saved.id(), oldDiff, update.newDifficulty()));
+                                    int newDiff = update.newDifficulty();
+                                    Question withNewDiff = q.withDifficulty(newDiff);
+                                    Mono<Question> withHintMono;
+                                    if (oldDiff <= 3 && newDiff >= 4) {
+                                        withHintMono = llmClient.generateHint(q.text())
+                                                .map(hint -> withNewDiff.withHint(hint.isEmpty() ? null : hint))
+                                                .onErrorReturn(withNewDiff);
+                                    } else if (oldDiff >= 4 && newDiff <= 3) {
+                                        withHintMono = Mono.just(withNewDiff.withHint(null));
+                                    } else {
+                                        withHintMono = Mono.just(withNewDiff);
+                                    }
+                                    return withHintMono.flatMap(finalQ -> questionService.updateQuestion(finalQ))
+                                            .map(saved -> String.format("ID: %s | %d → %d", saved.id(), oldDiff, newDiff));
                                 })
                                 .onErrorReturn(""))
                         .filter(s -> !s.isEmpty())
@@ -936,19 +960,25 @@ public class MessageDispatcher {
         if (questions.isEmpty())
             return "Список пуст.";
         return questions.stream()
-                .map(q -> String.format("ID: %s | Сложность: %d | Тема: %s\nQ: %s\nПравильный: %s\nНеправильные: %s",
-                        q.id(), q.difficulty(),
-                        q.topicNames() != null ? String.join(", ", q.topicNames()) : "—",
-                        q.text(), q.correctAnswer(),
-                        q.wrongAnswers() != null ? String.join(", ", q.wrongAnswers()) : "—"))
+                .map(q -> {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(String.format("ID: %s | Сложность: %d | Тема: %s\nQ: %s\nПравильный: %s\nНеправильные: %s",
+                            q.id(), q.difficulty(),
+                            q.topicNames() != null ? String.join(", ", q.topicNames()) : "—",
+                            q.text(), q.correctAnswer(),
+                            q.wrongAnswers() != null ? String.join(", ", q.wrongAnswers()) : "—"));
+                    if (q.explanation() != null) sb.append("\nПояснение: ").append(q.explanation());
+                    if (q.hint() != null) sb.append("\nПодсказка: ").append(q.hint());
+                    return sb.toString();
+                })
                 .collect(Collectors.joining("\n---\n"));
     }
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <ID> <новое_название>\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
+            return "Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         } else {
-            return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
+            return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         }
     }
 }

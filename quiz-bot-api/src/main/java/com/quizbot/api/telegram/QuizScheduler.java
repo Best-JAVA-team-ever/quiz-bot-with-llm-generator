@@ -18,6 +18,8 @@ import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
+import reactor.core.publisher.Mono;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -76,9 +78,21 @@ public class QuizScheduler {
                 for (var update : updates) {
                     questionService.getQuestionById(update.questionId()).subscribe(q -> {
                         if (q != null && q.difficulty() != update.newDifficulty()) {
-                            Question updated = q.withDifficulty(update.newDifficulty());
-                            questionService.updateQuestion(updated).subscribe();
-                            log.info("Updated difficulty for question {} to {}", q.id(), update.newDifficulty());
+                            int oldDiff = q.difficulty();
+                            int newDiff = update.newDifficulty();
+                            Question withNewDiff = q.withDifficulty(newDiff);
+                            Mono<Question> withHintMono;
+                            if (oldDiff <= 3 && newDiff >= 4) {
+                                withHintMono = llmClient.generateHint(q.text())
+                                        .map(hint -> withNewDiff.withHint(hint.isEmpty() ? null : hint))
+                                        .onErrorReturn(withNewDiff);
+                            } else if (oldDiff >= 4 && newDiff <= 3) {
+                                withHintMono = Mono.just(withNewDiff.withHint(null));
+                            } else {
+                                withHintMono = Mono.just(withNewDiff);
+                            }
+                            withHintMono.flatMap(finalQ -> questionService.updateQuestion(finalQ))
+                                    .subscribe(saved -> log.info("Updated difficulty for question {} to {}", saved.id(), newDiff));
                         }
                     });
                 }

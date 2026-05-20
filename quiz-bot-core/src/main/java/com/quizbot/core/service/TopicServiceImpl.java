@@ -101,15 +101,15 @@ public class TopicServiceImpl implements TopicService {
                 .switchIfEmpty(create(initiatorId, name));
     }
 
-    public Mono<Topic> rename(String initiatorId, String topicId, String newName) {
+    public Mono<Topic> rename(String initiatorId, String topicName, String newName) {
         if (!isValid(newName)) {
             return Mono.error(new IllegalArgumentException("Тема " + newName + " некорректна"));
         }
         return topicRepository.findByNameAndDeletedAtIsNull(newName)
                 .flatMap(existing -> Mono.<Topic>error(
                         new IllegalStateException("Тема " + newName + " уже существует")))
-                .switchIfEmpty(Mono.defer(() -> topicRepository.findByIdAndDeletedAtIsNull(topicId)))
-                .switchIfEmpty(Mono.error(new IllegalArgumentException("Тема с ID \"" + topicId + "\" не найдена")))
+                .switchIfEmpty(Mono.defer(() -> topicRepository.findByNameAndDeletedAtIsNull(topicName)))
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Тема \"" + topicName + "\" не найдена")))
                 .flatMap(topic -> {
                     String oldName = topic.name();
                     return topicRepository.save(topic.withName(newName))
