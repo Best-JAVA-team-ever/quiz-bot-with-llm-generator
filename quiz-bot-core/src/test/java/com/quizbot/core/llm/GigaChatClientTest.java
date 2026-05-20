@@ -1,6 +1,7 @@
 package com.quizbot.core.llm;
 
 import com.quizbot.core.domain.Question;
+import com.quizbot.core.service.LlmLogService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,8 +18,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -31,7 +31,10 @@ class GigaChatClientTest {
     @Mock
     private ObjectProvider<MeterRegistry> meterRegistryProvider;
 
-    @Mock(answer = Answers.RETURNS_DEEP_STUBS)
+    @Mock
+    private LlmLogService llmLogService;
+
+    @Mock
     private WebClient webClient;
 
     private GigaChatClient gigaChatClient;
@@ -39,7 +42,25 @@ class GigaChatClientTest {
     @BeforeEach
     void setUp() {
         when(meterRegistryProvider.getIfAvailable()).thenReturn(null);
-        gigaChatClient = new GigaChatClient(meterRegistryProvider, authService, webClient);
+        gigaChatClient = new GigaChatClient(meterRegistryProvider, authService, llmLogService, webClient);
+        
+        when(llmLogService.record(anyString(), anyString(), nullable(String.class), anyString(), anyBoolean(), nullable(String.class), anyInt()))
+                .thenReturn(Mono.empty());
+    }
+
+    private void setupWebClientMock(String mockResponse) {
+        WebClient.RequestBodyUriSpec requestBodyUriSpec = mock(WebClient.RequestBodyUriSpec.class);
+        WebClient.RequestBodySpec requestBodySpec = mock(WebClient.RequestBodySpec.class);
+        @SuppressWarnings("rawtypes")
+        WebClient.RequestHeadersSpec requestHeadersSpec = mock(WebClient.RequestHeadersSpec.class);
+        WebClient.ResponseSpec responseSpec = mock(WebClient.ResponseSpec.class);
+
+        when(webClient.post()).thenReturn(requestBodyUriSpec);
+        when(requestBodyUriSpec.uri(anyString())).thenReturn(requestBodySpec);
+        when(requestBodySpec.header(anyString(), any())).thenReturn(requestBodySpec);
+        when(requestBodySpec.bodyValue(any())).thenReturn(requestHeadersSpec);
+        when(requestHeadersSpec.retrieve()).thenReturn(responseSpec);
+        when(responseSpec.bodyToMono(any(Class.class))).thenReturn(Mono.just(mockResponse));
     }
 
     @Test
@@ -56,13 +77,7 @@ class GigaChatClientTest {
                 """;
 
         when(authService.getAccessToken()).thenReturn(Mono.just("test-token"));
-        when(webClient.post()
-                .uri(anyString())
-                .header(anyString(), anyString())
-                .bodyValue(any())
-                .retrieve()
-                .bodyToMono(String.class))
-                .thenReturn(Mono.just(mockResponse));
+        setupWebClientMock(mockResponse);
 
         StepVerifier.create(gigaChatClient.generateQuestion(List.of("Java"), 3))
                 .assertNext(q -> {
@@ -85,13 +100,7 @@ class GigaChatClientTest {
                 """;
 
         when(authService.getAccessToken()).thenReturn(Mono.just("test-token"));
-        when(webClient.post()
-                .uri(anyString())
-                .header(anyString(), anyString())
-                .bodyValue(any())
-                .retrieve()
-                .bodyToMono(String.class))
-                .thenReturn(Mono.just(mockResponse));
+        setupWebClientMock(mockResponse);
 
         StepVerifier.create(gigaChatClient.generateQuestion(List.of("Java"), 3))
                 .expectErrorMatches(e -> e.getMessage().contains("Превышен лимит"))

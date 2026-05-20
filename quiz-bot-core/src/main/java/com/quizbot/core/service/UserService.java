@@ -12,5 +12,7 @@ public interface UserService {
 
     Flux<Users> getAllUsers();
 
+    Flux<Users> findAllActive();
+
     Mono<Role> getRole(Long telegramId);
 }

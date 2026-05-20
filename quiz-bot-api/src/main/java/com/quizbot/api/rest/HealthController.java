@@ -14,7 +14,7 @@ public class HealthController {
     public Mono<Map<String, Object>> healthcheck() {
         return Mono.just(Map.of(
             "status", "UP",
-            "authors", List.of("Best JAVA TEAM :)")
+            "authors", List.of("Ivanov I.I.", "Petrov P.P.", "Sidorov S.S.")
         ));
     }
 }

@@ -3,6 +3,7 @@ package com.quizbot.api.telegram;
 import com.quizbot.api.dispatcher.BotResponse;
 import com.quizbot.core.domain.Question;
 import com.quizbot.core.domain.QuizSchedule;
+import com.quizbot.core.service.GroupService;
 import com.quizbot.core.service.QuestionService;
 import com.quizbot.core.service.QuizService;
 import com.quizbot.core.service.ScheduleService;
@@ -36,6 +37,7 @@ public class QuizScheduler {
     private final StatisticsService statisticsService;
     private final LlmClient llmClient;
     private final QuestionService questionService;
+    private final GroupService groupService;
     
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
 
@@ -46,7 +48,8 @@ public class QuizScheduler {
                          TaskScheduler taskScheduler,
                          StatisticsService statisticsService,
                          LlmClient llmClient,
-                         QuestionService questionService) {
+                         QuestionService questionService,
+                         GroupService groupService) {
         this.scheduleService = scheduleService;
         this.userService = userService;
         this.quizService = quizService;
@@ -55,6 +58,7 @@ public class QuizScheduler {
         this.statisticsService = statisticsService;
         this.llmClient = llmClient;
         this.questionService = questionService;
+        this.groupService = groupService;
     }
 
     @PostConstruct
@@ -84,9 +88,18 @@ public class QuizScheduler {
     @Scheduled(fixedRate = 60000)
     public void refreshSchedules() {
         scheduleService.getGlobalSchedule().subscribe(this::syncSchedule);
+        
+        // Добавляем синхронизацию групповых расписаний
+        userService.getAllUsers()
+            .flatMap(u -> groupService.getGroupsForUser(u.telegramId()))
+            .map(group -> group.id())
+            .distinct()
+            .flatMap(groupId -> scheduleService.getGroupSchedule(groupId))
+            .subscribe(this::syncSchedule);
     }
 
     private void syncSchedule(QuizSchedule schedule) {
+        if (schedule == null) return;
         String taskId = schedule.id();
         if (!schedule.isActive()) {
             ScheduledFuture<?> future = scheduledTasks.remove(taskId);
@@ -116,15 +129,28 @@ public class QuizScheduler {
     private void runScheduledQuiz(QuizSchedule schedule) {
         log.info("Executing scheduled quiz for schedule: {}", schedule.id());
         List<String> topics = schedule.topicName() != null ? List.of(schedule.topicName()) : List.of();
-        userService.getAllUsers().subscribe(user -> {
-            quizService.startQuiz(user.telegramId(), topics).subscribe(q -> {
-                if (q != null) {
-                    BotResponse response = formatQuestion(q);
-                    String header = "Автоматический вопрос дня!\n\n";
-                    BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
-                    telegramBot.sendResponse(user.telegramId(), null, headeredResponse);
-                }
+        
+        if (schedule.id().startsWith("group:")) {
+            String groupId = schedule.id().substring(6);
+            groupService.findMembers(groupId).subscribe(member -> {
+                long telegramId = Long.parseLong(member.userId());
+                sendScheduledQuestion(telegramId, topics);
             });
+        } else {
+            userService.findAllActive().subscribe(user -> {
+                sendScheduledQuestion(user.telegramId(), topics);
+            });
+        }
+    }
+
+    private void sendScheduledQuestion(long telegramId, List<String> topics) {
+        quizService.startQuiz(telegramId, topics).subscribe(q -> {
+            if (q != null) {
+                BotResponse response = formatQuestion(q);
+                String header = "Автоматический вопрос дня!\n\n";
+                BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
+                telegramBot.sendResponse(telegramId, null, headeredResponse);
+            }
         });
     }
 

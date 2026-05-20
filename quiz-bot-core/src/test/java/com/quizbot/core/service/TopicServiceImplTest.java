@@ -82,7 +82,7 @@ class TopicServiceImplTest {
         Topic deleted = topic.markAsDeleted();
         
         when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.just(topic));
-        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull(topic.id())).thenReturn(Mono.just(false));
+        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull(topic.name())).thenReturn(Mono.just(false));
         when(topicRepository.save(any(Topic.class))).thenReturn(Mono.just(deleted));
 
         StepVerifier.create(topicService.deleteTopic("Math"))

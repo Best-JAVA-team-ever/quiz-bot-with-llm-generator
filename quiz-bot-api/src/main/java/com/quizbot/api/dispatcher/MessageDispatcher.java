@@ -15,6 +15,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 import reactor.core.publisher.Flux;
@@ -41,11 +44,9 @@ public class MessageDispatcher {
     private final ScheduleService scheduleService;
     private final GroupService groupService;
     private final TelegramClient telegramClient;
+    private final ConversationContextRepository contextRepository;
 
-    // In-memory state storage (for production, this might need to be in Redis/DB)
-    private final Map<Long, ConversationContext> contexts = new HashMap<>();
-
-    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient) {
+    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient, ConversationContextRepository contextRepository) {
         this.userService = userService;
         this.questionService = questionService;
         this.topicService = topicService;
@@ -55,50 +56,58 @@ public class MessageDispatcher {
         this.scheduleService = scheduleService;
         this.groupService = groupService;
         this.telegramClient = telegramClient;
+        this.contextRepository = contextRepository;
     }
 
     public Mono<BotResponse> handleCommand(Long userId, String textIn) {
         String text = textIn.startsWith("/") ? "\\" + textIn.substring(1) : textIn;
         log.info("Received command from user {}: {}", userId, text);
-        ConversationContext context = contexts.computeIfAbsent(userId, k -> new ConversationContext());
 
-        if (text.equalsIgnoreCase("\\cancel")) {
-            context.reset();
-            return Mono.just(BotResponse.text("Действие отменено"));
-        }
+        return contextRepository.findById(userId)
+                .defaultIfEmpty(new ConversationContext(userId))
+                .flatMap(context -> {
+                    if (text.equalsIgnoreCase("\\cancel")) {
+                        context.reset();
+                        return contextRepository.save(context).thenReturn(BotResponse.text("Действие отменено"));
+                    }
 
-        return userService.getOrCreateUser(userId).flatMap(user -> {
-            if (context.getState() == UserState.IN_QUIZ) {
-                if (text.startsWith("\\") && !text.startsWith("\\ans_")) {
-                    context.reset();
-                    return Mono.just(BotResponse.text("Викторина окончена"));
-                }
-                return processQuizAnswer(userId, context, text);
-            }
-            if (context.getState() != UserState.IDLE) {
-                return handleConversation(user, context, text);
-            }
+                    return userService.getOrCreateUser(userId).flatMap(user -> {
+                        if (context.getState() == UserState.IN_QUIZ) {
+                            if (text.startsWith("\\") && !text.startsWith("\\ans_") && !text.startsWith("\\quiz_")) {
+                                context.reset();
+                                return contextRepository.save(context).thenReturn(BotResponse.text("Викторина окончена"));
+                            }
+                            return processQuizAnswer(userId, context, text)
+                                    .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
+                        }
+                        if (context.getState() != UserState.IDLE) {
+                            return handleConversation(user, context, text)
+                                    .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
+                        }
 
-            boolean isAdmin = user.role() == Role.ADMIN;
+                        boolean isAdmin = user.role() == Role.ADMIN;
 
-            if (text.startsWith("\\upgrade") && isAdmin) return handleUpgrade(text).map(BotResponse::text);
-            if (text.startsWith("\\add tag") && isAdmin) return handleAddTag(text).map(BotResponse::text);
-            if (text.startsWith("\\add question gen") && isAdmin) return startGenerateQuestion(context, text);
-            if (text.startsWith("\\add question") && isAdmin) return startAddQuestion(context, text);
-            if (text.startsWith("\\update question") && isAdmin) return startUpdateQuestion(context, text);
-            if (text.startsWith("\\update difficulty") && isAdmin) return handleUpdateDifficulty().map(BotResponse::text);
-            if (text.startsWith("\\delete question") && isAdmin) return handleDeleteQuestion(context, text);
-            if (text.startsWith("\\update tag") && isAdmin) return handleUpdateTag(userId, text).map(BotResponse::text);
-            if (text.startsWith("\\delete tag") && isAdmin) return handleDeleteTag(text).map(BotResponse::text);
-            if (text.startsWith("\\schedule") && isAdmin) return handleSchedule(text).map(BotResponse::text);
-            if (text.startsWith("\\group")) return handleGroup(user, context, text);
-            if (text.startsWith("\\get questions")) return handleGetQuestions(user, text).map(BotResponse::text);
-            if (text.startsWith("\\quiz start")) return startQuiz(userId, context, text);
-            if (text.startsWith("\\score")) return handleScore(userId, context, text);
-            if (text.equalsIgnoreCase("\\help")) return Mono.just(BotResponse.text(handleHelp(user)));
+                        Mono<BotResponse> actionMono;
+                        if (text.startsWith("\\upgrade") && isAdmin) actionMono = handleUpgrade(text).map(BotResponse::text);
+                        else if (text.startsWith("\\add tag") && isAdmin) actionMono = handleAddTag(text).map(BotResponse::text);
+                        else if (text.startsWith("\\add question gen") && isAdmin) actionMono = startGenerateQuestion(context, text);
+                        else if (text.startsWith("\\add question") && isAdmin) actionMono = startAddQuestion(context, text);
+                        else if (text.startsWith("\\update question") && isAdmin) actionMono = startUpdateQuestion(context, text);
+                        else if (text.startsWith("\\update difficulty") && isAdmin) actionMono = handleUpdateDifficulty().map(BotResponse::text);
+                        else if (text.startsWith("\\delete question") && isAdmin) actionMono = handleDeleteQuestion(context, text);
+                        else if (text.startsWith("\\update tag") && isAdmin) actionMono = handleUpdateTag(userId, text).map(BotResponse::text);
+                        else if (text.startsWith("\\delete tag") && isAdmin) actionMono = handleDeleteTag(text).map(BotResponse::text);
+                        else if (text.startsWith("\\schedule") && isAdmin) actionMono = handleSchedule(text).map(BotResponse::text);
+                        else if (text.startsWith("\\group")) actionMono = handleGroup(user, context, text);
+                        else if (text.startsWith("\\get questions")) actionMono = handleGetQuestions(user, text).map(BotResponse::text);
+                        else if (text.startsWith("\\quiz start")) actionMono = startQuiz(userId, context, text);
+                        else if (text.startsWith("\\score")) actionMono = handleScore(userId, context, text);
+                        else if (text.equalsIgnoreCase("\\help")) actionMono = Mono.just(BotResponse.text(handleHelp(user)));
+                        else actionMono = Mono.just(BotResponse.text("Неизвестная команда. Введите \\help для списка доступных команд."));
 
-            return Mono.just(BotResponse.text("Неизвестная команда. Введите \\help для списка доступных команд."));
-        });
+                        return actionMono.flatMap(resp -> contextRepository.save(context).thenReturn(resp));
+                    });
+                });
     }
 
     private Mono<BotResponse> startQuiz(Long userId, ConversationContext context, String text) {
@@ -152,10 +161,9 @@ public class MessageDispatcher {
         boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
         if (textIn.equalsIgnoreCase("\\quiz_ok")) {
-            return nextQuizQuestion(userId, context).map(r -> {
-                if (r.editMode()) return r;
-                return BotResponse.edit(r.text(), r.keyboard());
-            });
+            return Mono.just(BotResponse.edit("Ответ некорректный", null))
+                    .delayElement(java.time.Duration.ofMillis(500))
+                    .then(nextQuizQuestion(userId, context));
         }
         if (textIn.equalsIgnoreCase("\\quiz_explain")) {
             String explanation = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer() +
@@ -367,8 +375,11 @@ public class MessageDispatcher {
         }
 
         if (text.startsWith("\\start join_")) {
-            String groupId = text.replace("\\start join_", "").trim();
-            return groupService.addUserToGroup(groupId, user.telegramId()).thenReturn(BotResponse.text("Вы успешно вступили в группу!"));
+            String inviteId = text.replace("\\start join_", "").trim();
+            return groupService.getGroup(inviteId)
+                    .flatMap(g -> groupService.addUserToGroup(g.id(), user.telegramId())
+                            .thenReturn(BotResponse.text("Вы успешно вступили в группу «" + g.name() + "»!")))
+                    .switchIfEmpty(Mono.just(BotResponse.text("Приглашение недействительно")));
         }
 
         return Mono.just(BotResponse.text("Неизвестная подкоманда \\group"));
@@ -492,13 +503,12 @@ public class MessageDispatcher {
         String params = text.replace("\\update tag", "").trim();
         String[] parts = params.split(" ", 2);
         if (parts.length < 2 || parts[0].isBlank() || parts[1].isBlank()) {
-            return Mono.just("Использование: \\update tag <старое_название> <новое_название>");
+            return Mono.just("Использование: \\update tag <ID> <новое_название>");
         }
-        String oldName = parts[0].trim();
+        String topicId = parts[0].trim();
         String newName = parts[1].trim();
-        return topicService.rename(String.valueOf(userId), oldName, newName)
-                .map(t -> "Тема \"" + oldName + "\" переименована в \"" + newName
-                        + "\". Все связанные вопросы обновлены.")
+        return topicService.rename(String.valueOf(userId), topicId, newName)
+                .map(t -> "Тема с ID \"" + topicId + "\" успешно обновлена. Новое название: \"" + newName + "\"")
                 .onErrorResume(e -> Mono.just("Ошибка: " + e.getMessage()));
     }
 
@@ -546,20 +556,22 @@ public class MessageDispatcher {
             context.setState(UserState.AWAITING_CONFIRMATION);
             return Mono.just(BotResponse.buttons("Вы уверены?", keyboard));
         } else {
-            return questionService.getQuestionById(param).flatMap(q -> {
-                context.setDeleteScope("id");
-                context.setDeleteValue(param);
-                context.setState(UserState.AWAITING_CONFIRMATION);
-                return Mono.just(BotResponse.buttons("Вы уверены?", keyboard));
-            }).switchIfEmpty(topicService.exists(param).flatMap(exists -> {
-                if (exists) {
-                    context.setDeleteScope("topic");
+            return questionService.getQuestionById(param)
+                .flatMap(q -> {
+                    context.setDeleteScope("id");
                     context.setDeleteValue(param);
                     context.setState(UserState.AWAITING_CONFIRMATION);
                     return Mono.just(BotResponse.buttons("Вы уверены?", keyboard));
-                }
-                return Mono.just(BotResponse.text("Данной темы не существует"));
-            }));
+                })
+                .onErrorResume(e -> topicService.exists(param).flatMap(exists -> {
+                    if (exists) {
+                        context.setDeleteScope("topic");
+                        context.setDeleteValue(param);
+                        context.setState(UserState.AWAITING_CONFIRMATION);
+                        return Mono.just(BotResponse.buttons("Вы уверены?", keyboard));
+                    }
+                    return Mono.just(BotResponse.text("Вопрос с таким ID или тема не найдены"));
+                }));
         }
     }
 
@@ -878,7 +890,7 @@ public class MessageDispatcher {
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <старое_название> <новое_название>\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
+            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <ID> <новое_название>\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
         } else {
             return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
         }

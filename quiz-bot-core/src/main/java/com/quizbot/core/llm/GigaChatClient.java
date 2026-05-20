@@ -3,6 +3,7 @@ package com.quizbot.core.llm;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quizbot.core.domain.Question;
+import com.quizbot.core.service.LlmLogService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.netty.handler.ssl.SslContext;
@@ -31,18 +32,22 @@ public class GigaChatClient implements LlmClient {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
     private final GigaChatAuthService authService;
+    private final LlmLogService llmLogService;
     private final java.util.concurrent.atomic.AtomicLong lastRequestTime = new java.util.concurrent.atomic.AtomicLong(0);
 
     public GigaChatClient(org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider,
-                          GigaChatAuthService authService) {
-        this(meterRegistryProvider, authService, null);
+                          GigaChatAuthService authService,
+                          LlmLogService llmLogService) {
+        this(meterRegistryProvider, authService, llmLogService, null);
     }
 
     public GigaChatClient(org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider,
                           GigaChatAuthService authService,
+                          LlmLogService llmLogService,
                           WebClient webClient) {
         this.meterRegistry = meterRegistryProvider.getIfAvailable();
         this.authService = authService;
+        this.llmLogService = llmLogService;
         this.objectMapper = new ObjectMapper();
 
         if (webClient == null) {
@@ -70,6 +75,10 @@ public class GigaChatClient implements LlmClient {
 
     @Override
     public Mono<Question> generateQuestion(List<String> topics, Integer difficulty) {
+        return generateQuestionRecursive(topics, difficulty, 0);
+    }
+
+    private Mono<Question> generateQuestionRecursive(List<String> topics, Integer difficulty, int accumulatedTokens) {
         String prompt = String.format(
                 "Сгенерируй вопрос для викторины на темы: %s. Сложность: %d по шкале от 1 до 5.\n" +
                         "ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON БЕЗ ЛИШНЕГО ТЕКСТА И БЕЗ ВВОДНЫХ СЛОВ:\n" +
@@ -77,35 +86,47 @@ public class GigaChatClient implements LlmClient {
                 String.join(", ", topics), difficulty);
 
         return callGigaChatWithMetrics(prompt, "generate_question")
-                .map(response -> {
+                .flatMap(response -> {
                     try {
                         JsonNode root = objectMapper.readTree(response);
-                        JsonNode usage = root.path("usage");
-                        if (!usage.isMissingNode() && usage.path("total_tokens").asInt() > 1000) {
-                            throw new RuntimeException("Превышен лимит запросов к ИИ для этой операции");
-                        }
-                        String content = root.path("choices").get(0).path("message").path("content").asText();
+                        int requestTokens = root.path("usage").path("total_tokens").asInt();
+                        int totalTokens = accumulatedTokens + requestTokens;
 
-                        // Извлекаем JSON из текста, если модель добавила пояснения (например, "Вот ваш вопрос: ...")
+                        if (totalTokens > 1000) {
+                            return Mono.error(new RuntimeException("Сумма токенов для генерации превышена"));
+                        }
+
+                        String content = root.path("choices").get(0).path("message").path("content").asText();
                         String jsonOnly = extractJson(content);
                         JsonNode qNode = objectMapper.readTree(jsonOnly);
-                        
+
                         List<String> incorrect = new ArrayList<>();
                         qNode.path("incorrectAnswers").forEach(n -> incorrect.add(n.asText()));
 
-                        return Question.create(
+                        if (qNode.path("text").asText().isEmpty() || qNode.path("correctAnswer").asText().isEmpty() || incorrect.size() < 3) {
+                            throw new RuntimeException("Неполный ответ от модели");
+                        }
+
+                        return Mono.just(Question.create(
                                 qNode.path("text").asText(),
                                 qNode.path("correctAnswer").asText(),
                                 incorrect,
                                 difficulty,
                                 null, null,
-                                topics);
+                                topics));
                     } catch (Exception e) {
-                        throw new RuntimeException("Ошибка парсинга ответа: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
+                        log.warn("Failed to parse LLM response, retrying... Error: {}", e.getMessage());
+                        // Получаем токены даже при ошибке парсинга контента, если это возможно
+                        int used = 0;
+                        try {
+                            used = objectMapper.readTree(response).path("usage").path("total_tokens").asInt();
+                        } catch (Exception ignored) {}
+                        
+                        return generateQuestionRecursive(topics, difficulty, accumulatedTokens + Math.max(used, 100));
                     }
                 })
                 .onErrorMap(e -> {
-                    if (e.getMessage() != null && e.getMessage().contains("Превышен лимит")) {
+                    if (e.getMessage() != null && (e.getMessage().contains("превышена") || e.getMessage().contains("лимит"))) {
                         return e;
                     }
                     log.error("Failed to generate question: {}", e.getMessage());
@@ -222,17 +243,25 @@ public class GigaChatClient implements LlmClient {
             Mono.defer(() -> {
                 log.debug("Sending prompt to GigaChat for operation: {}", operation);
                 Timer.Sample sample = meterRegistry != null ? Timer.start(meterRegistry) : null;
+                long startTime = System.currentTimeMillis();
+                
                 return callGigaChat(prompt, token)
-                        .doOnSuccess(res -> {
+                        .flatMap(res -> {
+                            long duration = System.currentTimeMillis() - startTime;
                             if (sample != null) {
                                 sample.stop(meterRegistry.timer("llm.api.duration", "operation", operation, "status", "success"));
                                 meterRegistry.counter("llm.api.calls", "operation", operation, "status", "success").increment();
                             }
+                            return llmLogService.record(operation, prompt, res, "GigaChat", true, null, (int) duration)
+                                    .thenReturn(res);
                         })
-                        .doOnError(err -> {
+                        .onErrorResume(err -> {
+                            long duration = System.currentTimeMillis() - startTime;
                             if (sample != null) {
                                 sample.stop(meterRegistry.timer("llm.api.duration", "operation", operation, "status", "error"));
                             }
+                            return llmLogService.record(operation, prompt, null, "GigaChat", false, err.getMessage(), (int) duration)
+                                    .then(Mono.error(err));
                         });
             })
         );

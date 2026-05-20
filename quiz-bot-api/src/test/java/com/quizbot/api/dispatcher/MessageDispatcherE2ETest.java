@@ -18,6 +18,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,16 +33,28 @@ public class MessageDispatcherE2ETest {
     @Mock private ScheduleService scheduleService;
     @Mock private GroupService groupService;
     @Mock private TelegramClient telegramClient;
+    @Mock private ConversationContextRepository contextRepository;
 
     private MessageDispatcher messageDispatcher;
     private final Long userId = 12345L;
+    private final java.util.Map<Long, ConversationContext> contexts = new java.util.HashMap<>();
 
     @BeforeEach
     void setUp() {
-        messageDispatcher = new MessageDispatcher(userService, questionService, topicService, quizService, statisticsService, llmClient, scheduleService, groupService, telegramClient);
+        messageDispatcher = new MessageDispatcher(userService, questionService, topicService, quizService, statisticsService, llmClient, scheduleService, groupService, telegramClient, contextRepository);
         
-        Users user = new Users(String.valueOf(userId), userId, Role.USER, null, null);
+        Users user = new Users(String.valueOf(userId), userId, Role.USER, true, java.time.Instant.now(), java.time.Instant.now(), null);
         when(userService.getOrCreateUser(userId)).thenReturn(Mono.just(user));
+        
+        when(contextRepository.findById(anyLong())).thenAnswer(i -> {
+            Long id = i.getArgument(0);
+            return Mono.justOrEmpty(contexts.get(id));
+        });
+        when(contextRepository.save(any())).thenAnswer(i -> {
+            ConversationContext ctx = i.getArgument(0);
+            contexts.put(ctx.getUserId(), ctx);
+            return Mono.just(ctx);
+        });
     }
 
     @Test
@@ -50,7 +63,7 @@ public class MessageDispatcherE2ETest {
         
         when(topicService.exists("Java")).thenReturn(Mono.just(true));
         when(quizService.startQuiz(eq(userId), anyList())).thenReturn(Mono.just(q));
-        when(quizService.recordAnswer(eq(userId), anyString(), eq("Ans"), eq(true))).thenReturn(Mono.empty());
+        when(quizService.recordAnswer(eq(userId), nullable(String.class), eq("Ans"), eq(true))).thenReturn(Mono.empty());
 
         // 1. Start Quiz
         StepVerifier.create(messageDispatcher.handleCommand(userId, "\\quiz start Java"))
@@ -67,6 +80,7 @@ public class MessageDispatcherE2ETest {
 
         StepVerifier.create(messageDispatcher.handleCommand(userId, "\\ans_Ans"))
                 .assertNext(res -> {
+                    System.out.println("Quiz answer response: " + res.text());
                     assertTrue(res.text().contains("Ответ корректный"));
                     assertTrue(res.text().contains("Нет неотвеченных вопросов"));
                 })
@@ -75,37 +89,52 @@ public class MessageDispatcherE2ETest {
 
     @Test
     void testManualAddAndDeleteQuestion() {
-        Users admin = new Users("admin", userId, Role.ADMIN, null, null);
+        Users admin = new Users("admin", userId, Role.ADMIN, true, java.time.Instant.now(), java.time.Instant.now(), null);
         when(userService.getOrCreateUser(userId)).thenReturn(Mono.just(admin));
         when(topicService.exists(anyString())).thenReturn(Mono.just(true));
 
         // 1. Start Add Question
         StepVerifier.create(messageDispatcher.handleCommand(userId, "\\add question Java"))
-                .assertNext(res -> assertTrue(res.text().contains("Введите текст вопроса")))
+                .assertNext(res -> {
+                    System.out.println("Add question response: " + res.text());
+                    assertTrue(res.text().contains("Введите текст вопроса"));
+                })
                 .verifyComplete();
 
         // 2. Enter Text
         StepVerifier.create(messageDispatcher.handleCommand(userId, "What is Java?"))
-                .assertNext(res -> assertTrue(res.text().contains("Введите текст правильного ответа")))
+                .assertNext(res -> {
+                    System.out.println("Enter text response: " + res.text());
+                    assertTrue(res.text().contains("Введите текст правильного ответа"));
+                })
                 .verifyComplete();
         
-        // ... (skipping steps for brevity in this example, but real E2E would cover all)
+        // Cancel add question before delete
+        StepVerifier.create(messageDispatcher.handleCommand(userId, "\\cancel"))
+                .assertNext(res -> assertTrue(res.text().contains("отменено")))
+                .verifyComplete();
 
         // 3. Delete Question
         when(questionService.getQuestionById("q123")).thenReturn(Mono.just(mock(Question.class)));
         StepVerifier.create(messageDispatcher.handleCommand(userId, "\\delete question q123"))
-                .assertNext(res -> assertTrue(res.text().contains("Вы уверены")))
+                .assertNext(res -> {
+                    System.out.println("Delete question prompt: " + res.text());
+                    assertTrue(res.text().contains("Вы уверены"));
+                })
                 .verifyComplete();
 
         when(questionService.deleteQuestion("q123")).thenReturn(Mono.empty());
         StepVerifier.create(messageDispatcher.handleCommand(userId, "Да"))
-                .assertNext(res -> assertTrue(res.text().contains("Вопросы удалены")))
+                .assertNext(res -> {
+                    System.out.println("Delete confirmation response: " + res.text());
+                    assertTrue(res.text().contains("Вопросы удалены"));
+                })
                 .verifyComplete();
     }
 
     @Test
     void testLlmGenerationFlow() {
-        Users admin = new Users("admin", userId, Role.ADMIN, null, null);
+        Users admin = new Users("admin", userId, Role.ADMIN, true, java.time.Instant.now(), java.time.Instant.now(), null);
         when(userService.getOrCreateUser(userId)).thenReturn(Mono.just(admin));
         when(topicService.isValid(anyString())).thenReturn(true);
 

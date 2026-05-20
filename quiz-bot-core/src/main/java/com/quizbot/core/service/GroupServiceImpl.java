@@ -34,7 +34,7 @@ public class GroupServiceImpl implements GroupService {
     public Mono<Group> create(String initiatorId, String name) {
         String inviteId = UUID.randomUUID().toString().substring(0, 8);
         String inviteLink = "https://t.me/quiz_bot?start=join_" + inviteId;
-        Group group = Group.create(name, inviteLink);
+        Group group = new Group(inviteId, name, inviteLink, null, java.time.Instant.now(), null);
         return groupRepository.save(group)
                 .flatMap(saved -> {
                     if (initiatorId == null) return Mono.just(saved);
