@@ -82,7 +82,7 @@ class TopicServiceImplTest {
         Topic deleted = topic.markAsDeleted();
         
         when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.just(topic));
-        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull(topic.id())).thenReturn(Mono.just(false));
+        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull("Math")).thenReturn(Mono.just(false));
         when(topicRepository.save(any(Topic.class))).thenReturn(Mono.just(deleted));
 
         StepVerifier.create(topicService.deleteTopic("Math"))
@@ -90,12 +90,32 @@ class TopicServiceImplTest {
     }
 
     @Test
-    void exists_shouldDelegateToRepository() {
+    void exists_shouldReturnTrue_whenInTopicRepository() {
         Topic existing = Topic.create("Math");
         when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.just(existing));
 
         StepVerifier.create(topicService.exists("Math"))
                 .expectNext(true)
+                .verifyComplete();
+    }
+
+    @Test
+    void exists_shouldReturnTrue_whenOnlyInQuestionRepository() {
+        when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.empty());
+        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull("Math")).thenReturn(Mono.just(true));
+
+        StepVerifier.create(topicService.exists("Math"))
+                .expectNext(true)
+                .verifyComplete();
+    }
+
+    @Test
+    void exists_shouldReturnFalse_whenInNeither() {
+        when(topicRepository.findByNameAndDeletedAtIsNull("Math")).thenReturn(Mono.empty());
+        when(questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull("Math")).thenReturn(Mono.just(false));
+
+        StepVerifier.create(topicService.exists("Math"))
+                .expectNext(false)
                 .verifyComplete();
     }
 

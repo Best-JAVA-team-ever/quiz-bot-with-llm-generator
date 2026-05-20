@@ -34,7 +34,8 @@ public class GigaChatClient implements LlmClient {
     private final java.util.concurrent.atomic.AtomicLong lastRequestTime = new java.util.concurrent.atomic.AtomicLong(0);
 
     public GigaChatClient(org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider,
-                          GigaChatAuthService authService) {
+                          GigaChatAuthService authService,
+                          WebClient.Builder webClientBuilder) {
         this.meterRegistry = meterRegistryProvider.getIfAvailable();
         this.authService = authService;
         this.objectMapper = new ObjectMapper();
@@ -50,7 +51,7 @@ public class GigaChatClient implements LlmClient {
 
         HttpClient httpClient = HttpClient.create().secure(t -> t.sslContext(sslContext));
 
-        this.webClient = WebClient.builder()
+        this.webClient = webClientBuilder
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .baseUrl("https://gigachat.devices.sberbank.ru/api/v1")
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)

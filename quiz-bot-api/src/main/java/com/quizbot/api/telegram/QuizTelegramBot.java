@@ -22,13 +22,17 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
 
     @Override
     public void consume(Update update) {
-        if (update.hasMessage() && update.getMessage().hasText()) {
+        if (update.hasMessage()) {
             Message message = update.getMessage();
             long chatId = message.getChatId();
-            String text = message.getText();
 
-            messageDispatcher.handleCommand(chatId, text)
-                .subscribe(response -> sendText(chatId, response));
+            if (message.hasText()) {
+                String text = message.getText();
+                messageDispatcher.handleCommand(chatId, text)
+                    .subscribe(response -> sendText(chatId, response));
+            } else {
+                sendText(chatId, "Некорректный формат сообщения");
+            }
                 
         } else if (update.hasCallbackQuery()) {
             long chatId = update.getCallbackQuery().getMessage().getChatId();
@@ -40,12 +44,40 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
     }
 
     public void sendText(long chatId, String text) {
-        SendMessage sendMessage = SendMessage.builder()
+        SendMessage.SendMessageBuilder<?, ?> builder = SendMessage.builder()
                 .chatId(String.valueOf(chatId))
-                .text(text)
-                .build();
+                .text(text);
+
+        // Parse buttons in format [Label]
+        java.util.List<java.util.List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton>> keyboard = new java.util.ArrayList<>();
+        String[] lines = text.split("\n");
+        for (String line : lines) {
+            java.util.List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton> row = new java.util.ArrayList<>();
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\[(.*?)\\]");
+            java.util.regex.Matcher matcher = pattern.matcher(line);
+            while (matcher.find()) {
+                String label = matcher.group(1);
+                row.add(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
+                        .text(label)
+                        .callbackData(label)
+                        .build());
+            }
+            if (!row.isEmpty()) {
+                keyboard.add(row);
+            }
+        }
+
+        if (!keyboard.isEmpty()) {
+            java.util.List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow> rows = keyboard.stream()
+                    .map(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow::new)
+                    .collect(java.util.stream.Collectors.toList());
+            builder.replyMarkup(org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup.builder()
+                    .keyboard(rows)
+                    .build());
+        }
+
         try {
-            telegramClient.execute(sendMessage);
+            telegramClient.execute(builder.build());
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }

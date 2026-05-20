@@ -46,6 +46,11 @@ public class QuizBotApplication {
     }
 
     @Bean
+    public org.springframework.web.reactive.function.client.WebClient.Builder webClientBuilder() {
+        return org.springframework.web.reactive.function.client.WebClient.builder();
+    }
+
+    @Bean
     public MeterRegistry meterRegistry() {
         return new SimpleMeterRegistry();
     }

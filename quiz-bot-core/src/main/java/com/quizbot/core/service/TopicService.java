@@ -11,7 +11,7 @@ public interface TopicService {
 
     Mono<Void> deleteTopic(String name);
 
-    Mono<Topic> rename(String initiatorId, String topicId, String newName);
+    Mono<Topic> rename(String initiatorId, String oldName, String newName);
 
     Mono<Topic> findOrCreate(String initiatorId, String name);
 

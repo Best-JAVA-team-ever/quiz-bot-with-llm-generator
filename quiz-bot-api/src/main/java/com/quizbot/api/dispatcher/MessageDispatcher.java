@@ -3,6 +3,8 @@ package com.quizbot.api.dispatcher;
 import com.quizbot.core.domain.Question;
 import com.quizbot.core.domain.Users;
 import com.quizbot.core.domain.Role;
+import com.quizbot.core.domain.Topic;
+import com.quizbot.core.domain.GroupMember;
 import com.quizbot.core.llm.LlmClient;
 import com.quizbot.core.service.GroupService;
 import com.quizbot.core.service.QuestionService;
@@ -87,7 +89,7 @@ public class MessageDispatcher {
             if (text.startsWith("\\update tag") && isAdmin) return handleUpdateTag(userId, text);
             if (text.startsWith("\\delete tag") && isAdmin) return handleDeleteTag(text);
             if (text.startsWith("\\schedule") && isAdmin) return handleSchedule(text);
-            if (text.startsWith("\\group")) return handleGroup(user, context, text);
+            if (text.startsWith("\\group") || text.startsWith("\\start join_")) return handleGroup(user, context, text);
             if (text.startsWith("\\get questions")) return handleGetQuestions(user, text);
             if (text.startsWith("\\quiz start")) return startQuiz(userId, context, text);
             if (text.startsWith("\\score")) return handleScore(userId, context, text);
@@ -120,6 +122,7 @@ public class MessageDispatcher {
                     List<String> options = new ArrayList<>(q.wrongAnswers());
                     options.add(q.correctAnswer());
                     Collections.shuffle(options);
+                    context.setCurrentOptions(options);
 
                     StringBuilder sb = new StringBuilder();
                     sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
@@ -137,10 +140,38 @@ public class MessageDispatcher {
     }
 
     private Mono<String> processQuizAnswer(Long userId, ConversationContext context, String text) {
+        String cleaned = text.trim().replaceAll("[\\[\\]]", "");
         Question q = context.getActiveQuestion();
-        boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
-        return quizService.recordAnswer(userId, q.id(), text, isCorrect).then(Mono.defer(() -> {
+        if (cleaned.equalsIgnoreCase("Ок") || cleaned.equalsIgnoreCase("Ok") || cleaned.equalsIgnoreCase("Далее")) {
+            return nextQuizQuestion(userId, context);
+        }
+
+        if (cleaned.equalsIgnoreCase("Объяснить") || cleaned.equalsIgnoreCase("Explain")) {
+            return Mono.just("Пояснение: " + (q.explanation() != null ? q.explanation() : "нет") + "\n[Ок]");
+        }
+
+        final String initialAnswer = cleaned;
+        List<String> options = context.getCurrentOptions();
+        String answer = cleaned;
+
+        // If it's not an exact match, check if it's a numeric index
+        if (options != null && options.stream().noneMatch(o -> o.equalsIgnoreCase(initialAnswer))) {
+            String numericPart = answer.replaceAll("[^0-9]", "");
+            if (!numericPart.isEmpty() && answer.matches("^[0-9]+[.)]?$")) {
+                try {
+                    int index = Integer.parseInt(numericPart);
+                    if (index > 0 && index <= options.size()) {
+                        answer = options.get(index - 1);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+
+        boolean isCorrect = q.correctAnswer().equalsIgnoreCase(answer);
+
+        return quizService.recordAnswer(userId, q.id(), answer, isCorrect).then(Mono.defer(() -> {
             if (isCorrect) {
                 return nextQuizQuestion(userId, context).map(nextMsg -> "Ответ корректный\n\n" + nextMsg);
             } else {
@@ -245,7 +276,9 @@ public class MessageDispatcher {
                 String groupId = params.replace("delete", "").trim();
                 if (groupId.isEmpty())
                     return Mono.just("Использование: \\group delete <ID группы>");
-                return groupService.deleteGroup(groupId).thenReturn("Группа удалена");
+                context.setTargetGroupId(groupId);
+                context.setState(UserState.AWAITING_GROUP_DELETE_CONFIRMATION);
+                return Mono.just("Вы уверены, что хотите удалить группу? [Да] [Нет]");
             }
             if (params.startsWith("schedule set")) {
                 String[] parts = params.replace("schedule set", "").trim().split(" ", 2);
@@ -266,23 +299,19 @@ public class MessageDispatcher {
                 return scheduleService.disableGroupSchedule(groupId).thenReturn("Групповое расписание отключено");
             }
             if (params.equalsIgnoreCase("list")) {
-                // ИСПРАВЛЕНО: Group не содержит поле memberIds() — участники хранятся в
-                // GroupMember.
-                // GroupService не выставляет подсчёт участников в интерфейсе,
-                // поэтому счётчик убран. Если нужен — добавьте Mono<Long> countMembers(String
-                // groupId)
-                // в GroupService/GroupServiceImpl и используйте flatMap здесь.
                 return groupService.getAllGroups()
-                        .map(g -> g.id() + " " + g.name())
-                        .collectList()
-                        .map(l -> l.isEmpty() ? "Групп нет." : String.join("\n", l));
+                        .flatMap(g -> groupService.findMembers(g.id()).collectList().map(m -> 
+                            g.id() + " " + g.name() + "\nУчастники: " + (m.isEmpty() ? "нет" : m.stream().map(GroupMember::userId).collect(Collectors.joining(", ")))
+                        ))
+                        .collect(Collectors.joining("\n\n"))
+                        .map(s -> s.isEmpty() ? "Групп нет." : s);
             }
-            if (params.equalsIgnoreCase("score_all")) {
+            if (params.equalsIgnoreCase("score") || params.equalsIgnoreCase("score_all")) {
                 return groupService.getAllGroups()
                         .flatMap(g -> statisticsService.getGroupStats(g.id()).map(stats -> String.format(
                                 "Группа %s: всего %d, верных %d (%.1f%%)",
                                 g.name(), stats.get("total"), stats.get("correct"), stats.get("percentage"))))
-                        .collectList().map(l -> String.join("\n", l));
+                        .collect(Collectors.joining("\n"));
             }
         }
 
@@ -295,17 +324,36 @@ public class MessageDispatcher {
                         .collect(Collectors.joining("\n"));
             });
         }
+        if (params.startsWith("leave_")) {
+            String groupId = params.replace("leave_", "").trim();
+            return groupService.removeUserFromGroup(groupId, user.telegramId()).thenReturn("Вы покинули группу");
+        }
+        if (params.equalsIgnoreCase("list")) {
+            return groupService.getGroupsForUser(user.telegramId())
+                    .flatMap(g -> groupService.findMembers(g.id()).collectList().map(m -> 
+                        g.id() + " " + g.name() + "\nУчастники: " + (m.isEmpty() ? "нет" : m.stream().map(GroupMember::userId).collect(Collectors.joining(", ")))
+                    ))
+                    .collect(Collectors.joining("\n\n"))
+                    .map(s -> s.isEmpty() ? "Вы не состоите в группах." : s);
+        }
         if (params.equalsIgnoreCase("score")) {
             return groupService.getGroupsForUser(user.telegramId())
                     .flatMap(g -> statisticsService.getGroupStats(g.id()).map(stats -> String.format(
                             "Группа %s: всего %d, верных %d (%.1f%%)",
                             g.name(), stats.get("total"), stats.get("correct"), stats.get("percentage"))))
-                    .collectList().map(l -> String.join("\n", l));
+                    .collect(Collectors.joining("\n"));
         }
-
         if (text.startsWith("\\start join_")) {
-            String groupId = text.replace("\\start join_", "").trim();
-            return groupService.addUserToGroup(groupId, user.telegramId()).thenReturn("Вы успешно вступили в группу!");
+            String inviteId = text.replace("\\start join_", "").trim();
+            return groupService.getAllGroups()
+                    .filter(g -> g.inviteLink().endsWith(inviteId))
+                    .next()
+                    .flatMap(g -> {
+                        context.setTargetGroupId(g.id());
+                        context.setState(UserState.AWAITING_GROUP_JOIN_CONFIRMATION);
+                        return Mono.just("Вы хотите вступить в группу «" + g.name() + "»? [Да] [Нет]");
+                    })
+                    .switchIfEmpty(Mono.just("Приглашение недействительно"));
         }
 
         return Mono.just("Неизвестная подкоманда \\group");
@@ -326,26 +374,22 @@ public class MessageDispatcher {
         } else if (params.equalsIgnoreCase("status")) {
             return scheduleService.getGlobalSchedule()
                     .map(s -> String.format("Состояние: %s\nCron: %s\nТема: %s",
-                            s.isActive() ? "активно" : "отключено", s.cronExpression(), s.topicName()))
-                    .switchIfEmpty(Mono.just("Расписание не задано"));
+                            s.isActive() ? "активно" : "отключено", s.cronExpression(), s.topicName() != null ? s.topicName() : "не задана"))
+                    .switchIfEmpty(Mono.just("Глобальное расписание не установлено"));
         }
         return Mono.just("Использование: \\schedule <set cron|off|status>");
     }
 
     private Mono<String> handleScore(Long userId, ConversationContext context, String text) {
-        String param = text.replace("\\score", "").trim();
-
-        if (param.equalsIgnoreCase("reset")) {
+        if (text.equalsIgnoreCase("\\score reset")) {
             context.setState(UserState.AWAITING_SCORE_RESET_CONFIRMATION);
-            return Mono.just("Вы уверены? Весь прогресс будет удалён [Да] [Нет]");
+            return Mono.just("Вы уверены, что хотите сбросить свой счёт? [Да] [Нет]");
         }
-
-        String topicName = param.isEmpty() ? null : param;
-        if (topicName != null) {
+        String topicName = text.replace("\\score", "").trim();
+        if (!topicName.isEmpty()) {
             return topicService.exists(topicName).flatMap(exists -> {
-                if (!exists)
-                    return Mono.just("Темы " + topicName + " не существует");
-                return fetchStats(userId, topicName);
+                if (exists) return fetchStats(userId, topicName);
+                return Mono.just("Темы " + topicName + " не существует");
             });
         }
         return fetchStats(userId, null);
@@ -376,6 +420,16 @@ public class MessageDispatcher {
         return topicService.addTopic(tagName)
                 .map(t -> "Тема " + tagName + " добавлена")
                 .onErrorResume(e -> Mono.just(e.getMessage()));
+    }
+
+    private Mono<String> startGenerateQuestion(ConversationContext context, String text) {
+        String params = text.replace("\\add question gen", "").trim();
+        if (params.isEmpty())
+            return Mono.just("Не было введено название темы");
+        List<String> topics = Arrays.stream(params.split(" ")).filter(s -> !s.isBlank()).collect(Collectors.toList());
+        context.setPendingTopics(topics);
+        context.setState(UserState.AWAITING_GENERATION_DIFFICULTY);
+        return Mono.just("Выберите уровень сложности: [1] [2] [3] [4] [5]");
     }
 
     private Mono<String> startAddQuestion(ConversationContext context, String text) {
@@ -474,23 +528,9 @@ public class MessageDispatcher {
                     context.setState(UserState.AWAITING_CONFIRMATION);
                     return Mono.just("Вы уверены? [Да] [Нет]");
                 }
-                return Mono.just("Вопрос с таким ID или тема не существует");
+                return Mono.just("Данной темы не существует");
             }));
         }
-    }
-
-    private Mono<String> startGenerateQuestion(ConversationContext context, String text) {
-        String params = text.replace("\\add question gen", "").trim();
-        if (params.isEmpty())
-            return Mono.just("Не было введено название темы");
-        List<String> topics = new ArrayList<>(Arrays.asList(params.split(" ")));
-        for (String t : topics) {
-            if (!topicService.isValid(t))
-                return Mono.just(t + " — некорректное название темы");
-        }
-        context.setPendingTopics(topics);
-        context.setState(UserState.AWAITING_GENERATION_DIFFICULTY);
-        return Mono.just("Выберите уровень сложности [1] [2] [3] [4] [5]");
     }
 
     private Mono<String> handleConversation(Users user, ConversationContext context, String text) {
@@ -519,6 +559,28 @@ public class MessageDispatcher {
                 } else {
                     context.reset();
                     return Mono.just("Сброс отменён");
+                }
+            case AWAITING_GROUP_DELETE_CONFIRMATION:
+                if (text.equalsIgnoreCase("Да")) {
+                    String groupId = context.getTargetGroupId();
+                    return groupService.deleteGroup(groupId).then(Mono.defer(() -> {
+                        context.reset();
+                        return Mono.just("Группа удалена");
+                    }));
+                } else {
+                    context.reset();
+                    return Mono.just("Удаление группы отменено");
+                }
+            case AWAITING_GROUP_JOIN_CONFIRMATION:
+                if (text.equalsIgnoreCase("Да")) {
+                    String groupId = context.getTargetGroupId();
+                    return groupService.addUserToGroup(groupId, user.telegramId()).then(Mono.defer(() -> {
+                        context.reset();
+                        return Mono.just("Вы успешно вступили в группу!");
+                    }));
+                } else {
+                    context.reset();
+                    return Mono.just("Вступление в группу отменено");
                 }
             case AWAITING_CONFIRMATION:
                 if (text.equalsIgnoreCase("Да")) {
@@ -657,99 +719,117 @@ public class MessageDispatcher {
             return Mono.just("Текущее пояснение: " + (q.explanation() != null ? q.explanation() : "нет")
                     + "\nЖелаете изменить?\n[Изменить] [Оставить без изменений]");
 
-        return questionService.updateQuestion(context.getPendingQuestion()).map(saved -> {
-            String id = saved.id();
-            context.reset();
-            return "Вопрос " + id + " успешно обновлён";
-        });
+        return updateQuestionInDb(context);
     }
 
-    private Mono<String> applyUpdateValue(ConversationContext context, String text) {
-        Question q = context.getPendingQuestion();
+    private Mono<String> applyUpdateValue(ConversationContext context, String value) {
         int index = context.getUpdateFieldIndex();
+        Question q = context.getPendingQuestion();
 
-        try {
-            // ИСПРАВЛЕНО: вместо конструктора с неверным порядком полей используем
-            // with*-методы —
-            // они безопасны при любом изменении структуры record и корректно обновляют
-            // updatedAt
-            if (index == 0) {
-                if (!text.matches("^[а-яА-Яa-zA-Z0-9\\s\\.,!?;:\\-\"\\'()]{4,128}$"))
-                    throw new Exception("некорректный текст");
-                context.setPendingQuestion(q.withText(text));
-            } else if (index == 1) {
-                if (!isValidAnswer(text))
-                    throw new Exception("некорректный ответ");
-                context.setPendingQuestion(q.withCorrectAnswer(text));
-            } else if (index == 2) {
-                List<String> list = Arrays.stream(text.split(",")).map(String::trim).collect(Collectors.toList());
-                if (list.size() != 3)
-                    throw new Exception("введите 3 ответа через запятую");
-                context.setPendingQuestion(q.withWrongAnswers(list));
-            } else if (index == 3) {
-                int diff = Integer.parseInt(text);
-                if (diff < 1 || diff > 5)
-                    throw new Exception("1-5");
-                context.setPendingQuestion(q.withDifficulty(diff));
-            } else if (index == 4) {
-                context.setPendingQuestion(q.withExplanation(text));
+        if (index == 0) {
+            if (!value.matches("^[а-яА-Яa-zA-Z0-9\\s\\.,!?;:\\-\"\\'()]{4,128}$"))
+                return Mono.just("Некорректный формат текста вопроса. Попробуйте еще раз:");
+            context.setPendingQuestion(q.withText(value));
+        } else if (index == 1) {
+            if (!isValidAnswer(value))
+                return Mono.just("Некорректный формат ответа. Попробуйте еще раз:");
+            context.setPendingQuestion(q.withCorrectAnswer(value));
+        } else if (index == 2) {
+            List<String> wrong = Arrays.stream(value.split(",")).map(String::trim).collect(Collectors.toList());
+            if (wrong.size() != 3 || wrong.stream().anyMatch(a -> !isValidAnswer(a)))
+                return Mono.just("Введите ровно 3 неправильных ответа через запятую:");
+            context.setPendingQuestion(q.withWrongAnswers(wrong));
+        } else if (index == 3) {
+            try {
+                int d = Integer.parseInt(value);
+                if (d < 1 || d > 5)
+                    throw new Exception();
+                context.setPendingQuestion(q.withDifficulty(d));
+            } catch (Exception e) {
+                return Mono.just("Введите число от 1 до 5:");
             }
-        } catch (Exception e) {
-            return Mono.just("Ошибка: " + e.getMessage() + ". Попробуйте еще раз или \\cancel:");
+        } else if (index == 4) {
+            context.setPendingQuestion(q.withExplanation(value));
         }
 
-        context.setState(UserState.AWAITING_UPDATE_FIELD_CHOICE);
         return nextUpdateField(context);
     }
 
+    private Mono<String> updateQuestionInDb(ConversationContext context) {
+        return questionService.updateQuestion(context.getPendingQuestion())
+                .map(saved -> {
+                    context.reset();
+                    return "Вопрос успешно обновлен";
+                });
+    }
+
     private boolean isValidAnswer(String text) {
-        return text.matches("^[а-яА-Яa-zA-Z0-9\\s\\.,!?;:\\-\"\\'()]{2,32}$");
-    }
-
-    private Mono<String> handleGetQuestions(Users user, String text) {
-        boolean isAdmin = user.role() == Role.ADMIN;
-        String params = text.replace("\\get questions", "").trim();
-
-        if (isAdmin) {
-            if (params.isEmpty()) {
-                return topicService.getAllTopics()
-                        .flatMap(t -> questionService.getQuestionsByTopic(t.name()).count()
-                                .map(c -> t.name() + ": " + c))
-                        .collectList()
-                        .map(list -> list.isEmpty() ? "В системе пока нет тем." : String.join("\n", list));
-            } else if (params.equalsIgnoreCase("all")) {
-                return questionService.getAllQuestions().collectList().map(this::formatQuestionList);
-            } else {
-                return questionService.getQuestionsByTopic(params).collectList()
-                        .map(qs -> qs.isEmpty() ? "Вопросов по теме " + params + " не найдено."
-                                : formatQuestionList(qs));
-            }
-        } else {
-            if (!params.isEmpty())
-                return Mono.just("Недоступная команда");
-            return topicService.getAllTopics()
-                    .flatMap(t -> questionService.getQuestionsByTopic(t.name()).count()
-                            .flatMap(total -> statisticsService.getUserStats(user.telegramId(), t.name())
-                                    .map(stats -> String.format("%s: всего %d, пройдено %d", t.name(), total,
-                                            stats.get("correct")))))
-                    .collectList().map(list -> "Темы и ваш прогресс:\n" + String.join("\n", list));
-        }
-    }
-
-    private String formatQuestionList(List<Question> questions) {
-        if (questions.isEmpty())
-            return "Список пуст.";
-        return questions.stream()
-                .map(q -> String.format("ID: %s | Сложность: %d | Тема: %s\nQ: %s\nA: %s",
-                        q.id(), q.difficulty(), String.join(", ", q.topicNames()), q.text(), q.correctAnswer()))
-                .collect(Collectors.joining("\n---\n"));
+        return text.matches("^[а-яА-Яa-zA-Z0-9\\s\\.,!?;:\\-\"\\'()]{1,64}$");
     }
 
     private String handleHelp(Users user) {
+        StringBuilder sb = new StringBuilder("Доступные команды:\n");
+        sb.append("\\quiz start [topics] — запуск викторины\n");
+        sb.append("\\score [topic] — ваша статистика\n");
+        sb.append("\\score reset — сброс статистики\n");
+        sb.append("\\group list — список ваших групп\n");
+        sb.append("\\group leave — покинуть группу\n");
+        sb.append("\\group score — статистика ваших групп\n");
+        sb.append("\\help — это сообщение\n");
+        sb.append("\\cancel — отмена текущего действия\n");
+
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <старое> <новое>\n\\cancel\n\\group create <название>\n\\group invite <ID> <ID>\n\\group exclude <ID> <ID>\n\\group delete <ID>\n\\group list\n\\group score_all\n\\group schedule set <ID> <cron>\n\\group schedule off <ID>\n\\schedule set <cron>\n\\schedule off\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
+            sb.append("\nКоманды администратора:\n");
+            sb.append("\\upgrade <ID> — повысить роль пользователя\n");
+            sb.append("\\add tag <name> — добавить новую тему\n");
+            sb.append("\\add question <topics> — добавить вопрос вручную\n");
+            sb.append("\\add question gen <topics> — сгенерировать вопрос через LLM\n");
+            sb.append("\\update question <ID> — изменить вопрос\n");
+            sb.append("\\delete question <ID|Topic|all> — удалить вопрос(ы)\n");
+            sb.append("\\update tag <old> <new> — переименовать тему\n");
+            sb.append("\\delete tag <name> — удалить тему\n");
+            sb.append("\\schedule set <cron> — настроить глобальное расписание\n");
+            sb.append("\\schedule off — отключить глобальное расписание\n");
+            sb.append("\\schedule status — проверить глобальное расписание\n");
+            sb.append("\\group create <name> — создать группу\n");
+            sb.append("\\group invite <groupID> <userID> — пригласить в группу\n");
+            sb.append("\\group exclude <groupID> <userID> — исключить из группы\n");
+            sb.append("\\group delete <groupID> — удалить группу\n");
+            sb.append("\\group schedule set <groupID> <cron> — расписание группы\n");
+            sb.append("\\group schedule off <groupID> — отключить расписание группы\n");
+            sb.append("\\get questions all — все вопросы\n");
+            sb.append("\\get questions <topic> — вопросы по теме\n");
+            sb.append("\\update difficulty — адаптивное обновление сложности (LLM)\n");
         } else {
-            return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
+            sb.append("\nКоманды просмотра вопросов:\n");
+            sb.append("\\get questions — список доступных тем\n");
         }
+        return sb.toString();
+    }
+
+    private Mono<String> handleGetQuestions(Users user, String text) {
+        String param = text.replace("\\get questions", "").trim();
+        if (param.isEmpty()) {
+            return topicService.getAllTopics()
+                    .map(Topic::name)
+                    .collectList()
+                    .map(list -> "Доступные темы:\n" + String.join(", ", list));
+        }
+
+        if (user.role() != Role.ADMIN) {
+            return Mono.just("Команда \\get questions <Topic> доступна только администраторам");
+        }
+
+        if (param.equalsIgnoreCase("all")) {
+            return questionService.getAllQuestions()
+                    .map(q -> String.format("[%s] %s (Тема: %s)", q.id(), q.text(), String.join(", ", q.topicNames())))
+                    .collectList()
+                    .map(list -> list.isEmpty() ? "Вопросов нет" : String.join("\n", list));
+        }
+
+        return questionService.getQuestionsByTopic(param)
+                .map(q -> String.format("[%s] %s", q.id(), q.text()))
+                .collectList()
+                .map(list -> list.isEmpty() ? "Вопросов по теме " + param + " не найдено" : String.join("\n", list));
     }
 }

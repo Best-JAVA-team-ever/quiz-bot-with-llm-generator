@@ -43,5 +43,9 @@ subprojects {
     tasks.withType<Test> {
         useJUnitPlatform()
         jvmArgs("-Dnet.bytebuddy.experimental=true")
+        testLogging {
+            showStandardStreams = true
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        }
     }
 }

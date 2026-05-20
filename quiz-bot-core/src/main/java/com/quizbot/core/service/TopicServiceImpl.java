@@ -66,7 +66,7 @@ public class TopicServiceImpl implements TopicService {
         return topicRepository.findByNameAndDeletedAtIsNull(name)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Данной темы не существует")))
                 .flatMap(topic -> questionRepository
-                        .existsByTopicNamesContainingAndDeletedAtIsNull(topic.id())
+                        .existsByTopicNamesContainingAndDeletedAtIsNull(topic.name())
                         .flatMap(hasQuestions -> {
                             if (hasQuestions) {
                                 return Mono.<Void>error(new IllegalStateException(
@@ -84,7 +84,11 @@ public class TopicServiceImpl implements TopicService {
 
     @Override
     public Mono<Boolean> exists(String name) {
-        return topicRepository.findByNameAndDeletedAtIsNull(name).hasElement();
+        return topicRepository.findByNameAndDeletedAtIsNull(name).hasElement()
+                .flatMap(exists -> {
+                    if (exists) return Mono.just(true);
+                    return questionRepository.existsByTopicNamesContainingAndDeletedAtIsNull(name);
+                });
     }
 
     @Override
@@ -101,34 +105,31 @@ public class TopicServiceImpl implements TopicService {
                 .switchIfEmpty(create(initiatorId, name));
     }
 
-    public Mono<Topic> rename(String initiatorId, String topicId, String newName) {
-    if (!isValid(newName)) {
-        return Mono.error(new IllegalArgumentException("Тема " + newName + " некорректна"));
-    }
-    return topicRepository.findByIdAndDeletedAtIsNull(topicId)
-            .switchIfEmpty(Mono.error(new IllegalArgumentException("Тема не найдена")))
-            .flatMap(topic -> {
-                String oldName = topic.name();
-                return topicRepository.save(topic.withName(newName))
-                        .flatMap(saved ->
-                            questionRepository
+    @Override
+    public Mono<Topic> rename(String initiatorId, String oldName, String newName) {
+        if (!isValid(newName)) {
+            return Mono.error(new IllegalArgumentException("Тема " + newName + " некорректна"));
+        }
+        return topicRepository.findByNameAndDeletedAtIsNull(oldName)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Тема не найдена")))
+                .flatMap(topic -> topicRepository.save(topic.withName(newName))
+                        .flatMap(saved -> questionRepository
                                 .findAllByTopicNamesContainingAndDeletedAtIsNull(oldName)
                                 .flatMap(q -> {
                                     List<String> updated = q.topicNames().stream()
-                                        .map(n -> n.equals(oldName) ? newName : n)
-                                        .toList();
+                                            .map(n -> n.equals(oldName) ? newName : n)
+                                            .toList();
                                     return questionRepository.save(q.withTopicNames(updated));
                                 })
-                                .then(Mono.just(saved))
-                        );
-            })
-            .flatMap(topic -> {
-                if (initiatorId == null) return Mono.just(topic);
-                return auditLogService
-                        .log(initiatorId, "RENAME_TOPIC", CollectionsName.TOPIC.name(), topic.id())
-                        .thenReturn(topic);
-            });
-}
+                                .then(Mono.just(saved))))
+                .flatMap(topic -> {
+                    if (initiatorId == null)
+                        return Mono.just(topic);
+                    return auditLogService
+                            .log(initiatorId, "RENAME_TOPIC", CollectionsName.TOPIC.name(), topic.id())
+                            .thenReturn(topic);
+                });
+    }
 
     public Mono<Topic> findByName(String name) {
         return topicRepository.findByNameAndDeletedAtIsNull(name)

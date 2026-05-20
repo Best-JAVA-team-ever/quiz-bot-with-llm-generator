@@ -12,11 +12,13 @@ public class ConversationContext {
     private List<String> incorrectAnswers = new ArrayList<>();
     private Integer difficulty;
     private String targetId; // For updates/deletes
+    private String targetGroupId; // For group actions
     private String deleteScope; // 'id', 'topic', 'all'
     private String deleteValue; // topic name or id
     private int updateFieldIndex = 0; // 0: text, 1: correct, 2: incorrect, 3: difficulty, 4: explanation
     private Question pendingQuestion;
     private Question activeQuestion;
+    private List<String> currentOptions = new ArrayList<>();
 
     public UserState getState() { return state; }
     public void setState(UserState state) { this.state = state; }
@@ -38,6 +40,9 @@ public class ConversationContext {
     public String getTargetId() { return targetId; }
     public void setTargetId(String targetId) { this.targetId = targetId; }
 
+    public String getTargetGroupId() { return targetGroupId; }
+    public void setTargetGroupId(String targetGroupId) { this.targetGroupId = targetGroupId; }
+
     public String getDeleteScope() { return deleteScope; }
     public void setDeleteScope(String deleteScope) { this.deleteScope = deleteScope; }
 
@@ -53,6 +58,9 @@ public class ConversationContext {
     public Question getActiveQuestion() { return activeQuestion; }
     public void setActiveQuestion(Question activeQuestion) { this.activeQuestion = activeQuestion; }
 
+    public List<String> getCurrentOptions() { return currentOptions; }
+    public void setCurrentOptions(List<String> currentOptions) { this.currentOptions = currentOptions; }
+
     public void reset() {
         state = UserState.IDLE;
         pendingTopics.clear();
@@ -61,10 +69,12 @@ public class ConversationContext {
         incorrectAnswers.clear();
         difficulty = null;
         targetId = null;
+        targetGroupId = null;
         deleteScope = null;
         deleteValue = null;
         updateFieldIndex = 0;
         pendingQuestion = null;
         activeQuestion = null;
+        currentOptions.clear();
     }
 }
