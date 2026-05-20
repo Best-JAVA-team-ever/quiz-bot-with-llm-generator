@@ -54,16 +54,18 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
 
     public void sendResponse(long chatId, Integer messageId, BotResponse response) {
         if (response.editMode() && messageId != null) {
+            InlineKeyboardMarkup markup = (response.keyboard() != null && !response.keyboard().isEmpty())
+                    ? createKeyboardMarkup(response.keyboard())
+                    : new InlineKeyboardMarkup(new ArrayList<>());
             EditMessageText edit = EditMessageText.builder()
                     .chatId(String.valueOf(chatId))
                     .messageId(messageId)
                     .text(response.text())
-                    .replyMarkup(createKeyboardMarkup(response.keyboard()))
+                    .replyMarkup(markup)
                     .build();
             try {
                 telegramClient.execute(edit);
             } catch (TelegramApiException e) {
-                // If editing fails (e.g. content same), just send a new message
                 sendNewMessage(chatId, response);
             }
         } else {

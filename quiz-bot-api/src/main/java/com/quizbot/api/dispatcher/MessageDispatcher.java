@@ -191,9 +191,8 @@ public class MessageDispatcher {
         boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
         if (textIn.equalsIgnoreCase("\\quiz_ok")) {
-            return Mono.just(BotResponse.edit("Ответ некорректный", null))
-                    .delayElement(java.time.Duration.ofMillis(500))
-                    .then(nextQuizQuestion(userId, context));
+            return nextQuizQuestion(userId, context)
+                    .map(next -> BotResponse.edit(next.text(), next.keyboard()));
         }
         if (textIn.equalsIgnoreCase("\\quiz_explain")) {
             String explanation = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer() +
@@ -388,7 +387,7 @@ public class MessageDispatcher {
                     .flatMap(g -> statisticsService.getGroupStats(g.id()).map(stats -> String.format(
                             "Группа %s: всего %d, верных %d (%.1f%%)",
                             g.name(), stats.get("total"), stats.get("correct"), stats.get("percentage"))))
-                    .collectList().map(l -> BotResponse.text(String.join("\n", l)));
+                    .collectList().map(l -> BotResponse.text(l.isEmpty() ? "Вы не состоите в группах" : String.join("\n", l)));
         }
 
         if (text.startsWith("\\group_join_")) {
@@ -400,7 +399,11 @@ public class MessageDispatcher {
         }
         if (text.startsWith("\\group_leave_")) {
             String groupId = text.replace("\\group_leave_", "").trim();
-            return groupService.removeUserFromGroup(groupId, user.telegramId()).thenReturn(BotResponse.text("Вы вышли из группы"));
+            return groupService.getGroup(groupId)
+                    .flatMap(g -> groupService.removeUserFromGroup(groupId, user.telegramId())
+                            .thenReturn(BotResponse.edit("Вы вышли из группы " + g.name(), null)))
+                    .switchIfEmpty(groupService.removeUserFromGroup(groupId, user.telegramId())
+                            .thenReturn(BotResponse.edit("Вы вышли из группы", null)));
         }
 
         if (text.startsWith("\\start join_")) {
@@ -557,17 +560,25 @@ public class MessageDispatcher {
         return statisticsService.getQuestionsWithStats().collectList().flatMap(stats -> {
             if (stats.isEmpty())
                 return Mono.just("Нет данных для анализа сложности.");
-            llmClient.suggestDifficultyUpdates(stats).subscribe(updates -> {
-                for (var update : updates) {
-                    questionService.getQuestionById(update.questionId()).subscribe(q -> {
-                        if (q != null && q.difficulty() != update.newDifficulty()) {
-                            questionService.updateQuestion(q.withDifficulty(update.newDifficulty())).subscribe();
-                        }
-                    });
-                }
+            return llmClient.suggestDifficultyUpdates(stats).flatMap(updates -> {
+                if (updates.isEmpty())
+                    return Mono.just("LLM не предложила изменений сложности.");
+                return Flux.fromIterable(updates)
+                        .flatMap(update -> questionService.getQuestionById(update.questionId())
+                                .flatMap(q -> {
+                                    if (q.difficulty() == update.newDifficulty())
+                                        return Mono.just("");
+                                    int oldDiff = q.difficulty();
+                                    return questionService.updateQuestion(q.withDifficulty(update.newDifficulty()))
+                                            .map(saved -> String.format("ID: %s | %d → %d", saved.id(), oldDiff, update.newDifficulty()));
+                                })
+                                .onErrorReturn(""))
+                        .filter(s -> !s.isEmpty())
+                        .collectList()
+                        .map(changes -> changes.isEmpty()
+                                ? "Уровни сложности проверены. Изменений не потребовалось."
+                                : "Обновлены уровни сложности:\n" + String.join("\n", changes));
             });
-            return Mono.just(
-                    "Запущен процесс адаптивного обновления уровней сложности. Это может занять некоторое время.");
         });
     }
 
