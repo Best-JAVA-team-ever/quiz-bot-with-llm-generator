@@ -1,22 +1,37 @@
 package com.quizbot.api.dispatcher;
 
 import com.quizbot.core.domain.Question;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
+
 import java.util.ArrayList;
 import java.util.List;
 
+@Document("conversation_contexts")
 public class ConversationContext {
+    @Id
+    private Long userId;
     private UserState state = UserState.IDLE;
     private List<String> pendingTopics = new ArrayList<>();
     private String questionText;
     private String correctAnswer;
     private List<String> incorrectAnswers = new ArrayList<>();
     private Integer difficulty;
-    private String targetId; // For updates/deletes
-    private String deleteScope; // 'id', 'topic', 'all'
-    private String deleteValue; // topic name or id
-    private int updateFieldIndex = 0; // 0: text, 1: correct, 2: incorrect, 3: difficulty, 4: explanation
+    private String targetId;
+    private String deleteScope;
+    private String deleteValue;
+    private int updateFieldIndex = 0;
     private Question pendingQuestion;
     private Question activeQuestion;
+    private List<String> currentOptions = new ArrayList<>();
+
+    public ConversationContext() {}
+
+    public ConversationContext(Long userId) {
+        this.userId = userId;
+    }
+
+    public Long getUserId() { return userId; }
 
     public UserState getState() { return state; }
     public void setState(UserState state) { this.state = state; }
@@ -31,7 +46,7 @@ public class ConversationContext {
     public void setCorrectAnswer(String correctAnswer) { this.correctAnswer = correctAnswer; }
 
     public List<String> getIncorrectAnswers() { return incorrectAnswers; }
-    
+
     public Integer getDifficulty() { return difficulty; }
     public void setDifficulty(Integer difficulty) { this.difficulty = difficulty; }
 
@@ -53,12 +68,15 @@ public class ConversationContext {
     public Question getActiveQuestion() { return activeQuestion; }
     public void setActiveQuestion(Question activeQuestion) { this.activeQuestion = activeQuestion; }
 
+    public List<String> getCurrentOptions() { return currentOptions; }
+    public void setCurrentOptions(List<String> currentOptions) { this.currentOptions = currentOptions; }
+
     public void reset() {
         state = UserState.IDLE;
-        pendingTopics.clear();
+        pendingTopics = new ArrayList<>();
         questionText = null;
         correctAnswer = null;
-        incorrectAnswers.clear();
+        incorrectAnswers = new ArrayList<>();
         difficulty = null;
         targetId = null;
         deleteScope = null;
@@ -66,5 +84,6 @@ public class ConversationContext {
         updateFieldIndex = 0;
         pendingQuestion = null;
         activeQuestion = null;
+        currentOptions = new ArrayList<>();
     }
 }

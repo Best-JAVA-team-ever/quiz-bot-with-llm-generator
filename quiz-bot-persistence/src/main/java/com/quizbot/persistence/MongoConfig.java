@@ -8,7 +8,7 @@ import org.springframework.data.mongodb.config.AbstractReactiveMongoConfiguratio
 import org.springframework.data.mongodb.repository.config.EnableReactiveMongoRepositories;
 
 @Configuration
-@EnableReactiveMongoRepositories(basePackages = "com.quizbot.core.repository")
+@EnableReactiveMongoRepositories(basePackages = {"com.quizbot.core.repository", "com.quizbot.api.dispatcher"})
 public class MongoConfig extends AbstractReactiveMongoConfiguration {
 
     @Value("${spring.data.mongodb.uri}")

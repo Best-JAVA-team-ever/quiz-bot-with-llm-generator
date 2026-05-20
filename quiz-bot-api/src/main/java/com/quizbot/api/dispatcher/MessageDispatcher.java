@@ -23,9 +23,7 @@ import reactor.core.publisher.Mono;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
@@ -41,11 +39,9 @@ public class MessageDispatcher {
     private final ScheduleService scheduleService;
     private final GroupService groupService;
     private final TelegramClient telegramClient;
+    private final ConversationContextRepository contextRepository;
 
-    // In-memory state storage (for production, this might need to be in Redis/DB)
-    private final Map<Long, ConversationContext> contexts = new HashMap<>();
-
-    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient) {
+    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient, ConversationContextRepository contextRepository) {
         this.userService = userService;
         this.questionService = questionService;
         this.topicService = topicService;
@@ -55,13 +51,25 @@ public class MessageDispatcher {
         this.scheduleService = scheduleService;
         this.groupService = groupService;
         this.telegramClient = telegramClient;
+        this.contextRepository = contextRepository;
     }
 
     public Mono<String> handleCommand(Long userId, String textIn) {
         String text = textIn.startsWith("/") ? "\\" + textIn.substring(1) : textIn;
         log.info("Received command from user {}: {}", userId, text);
-        ConversationContext context = contexts.computeIfAbsent(userId, k -> new ConversationContext());
 
+        return contextRepository.findById(userId)
+                .defaultIfEmpty(new ConversationContext(userId))
+                .flatMap(context -> executeCommand(userId, text, context)
+                        .flatMap(result -> contextRepository.save(context).thenReturn(result))
+                        .onErrorResume(e -> {
+                            log.error("Ошибка при обработке команды '{}' от {}: {}", text, userId, e.getMessage());
+                            context.reset();
+                            return contextRepository.save(context).thenReturn("Произошла внутренняя ошибка. Попробуйте ещё раз.");
+                        }));
+    }
+
+    private Mono<String> executeCommand(Long userId, String text, ConversationContext context) {
         if (text.equalsIgnoreCase("\\cancel")) {
             context.reset();
             return Mono.just("Действие отменено");
@@ -69,7 +77,7 @@ public class MessageDispatcher {
 
         return userService.getOrCreateUser(userId).flatMap(user -> {
             if (context.getState() == UserState.IN_QUIZ) {
-                if (text.startsWith("\\")) {
+                if (text.startsWith("\\") && !text.startsWith("\\ans_")) {
                     context.reset();
                     return Mono.just("Викторина окончена");
                 }
@@ -126,6 +134,7 @@ public class MessageDispatcher {
                     List<String> options = new ArrayList<>(q.wrongAnswers());
                     options.add(q.correctAnswer());
                     Collections.shuffle(options);
+                    context.setCurrentOptions(options);
 
                     StringBuilder sb = new StringBuilder();
                     sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
@@ -144,15 +153,31 @@ public class MessageDispatcher {
 
     private Mono<String> processQuizAnswer(Long userId, ConversationContext context, String text) {
         Question q = context.getActiveQuestion();
-        boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
+        if (q == null) return Mono.just("Викторина не активна");
 
-        return quizService.recordAnswer(userId, q.id(), text, isCorrect).then(Mono.defer(() -> {
+        String answer;
+        if (text.startsWith("\\ans_")) {
+            try {
+                int index = Integer.parseInt(text.substring(5));
+                List<String> opts = context.getCurrentOptions();
+                if (opts == null || index < 0 || index >= opts.size())
+                    return Mono.just("Некорректный выбор");
+                answer = opts.get(index);
+            } catch (NumberFormatException e) {
+                return Mono.just("Некорректный выбор");
+            }
+        } else {
+            answer = text;
+        }
+
+        boolean isCorrect = q.correctAnswer().equalsIgnoreCase(answer);
+
+        return quizService.recordAnswer(userId, q.id(), answer, isCorrect).then(Mono.defer(() -> {
             if (isCorrect) {
-                return nextQuizQuestion(userId, context).map(nextMsg -> "Ответ корректный\n\n" + nextMsg);
+                return nextQuizQuestion(userId, context).map(nextMsg -> "Ответ корректный!\n\n" + nextMsg);
             } else {
                 return Mono.just("Ответ некорректный\nКорректный ответ: " + q.correctAnswer() +
-                        "\nПояснение: " + (q.explanation() != null ? q.explanation() : "нет") +
-                        "\n[Ок] [Объяснить]");
+                        "\nПояснение: " + (q.explanation() != null ? q.explanation() : "нет"));
             }
         }));
     }
@@ -322,22 +347,40 @@ public class MessageDispatcher {
     private Mono<String> handleSchedule(String text) {
         String params = text.replace("\\schedule", "").trim();
         if (params.startsWith("set")) {
-            String cron = params.replace("set", "").trim();
+            String rest = params.substring(3).trim();
+            String[] tokens = rest.split("\\s+");
+            if (tokens.length < 6)
+                return Mono.just("Использование: \\schedule set <cron 6 полей> [тема]");
+            String cron = String.join(" ", Arrays.copyOfRange(tokens, 0, 6));
+            String topic = tokens.length > 6 ? tokens[6] : null;
             try {
                 org.springframework.scheduling.support.CronExpression.parse(cron);
-                return scheduleService.setGlobalSchedule(cron, null).thenReturn("Расписание установлено: " + cron);
             } catch (Exception e) {
                 return Mono.just("Некорректное cron-выражение");
             }
+            if (topic == null) {
+                return scheduleService.setGlobalSchedule(cron, null).thenReturn("Расписание установлено: " + cron);
+            }
+            final String finalCron = cron;
+            final String finalTopic = topic;
+            return topicService.exists(topic).flatMap(exists -> {
+                if (!exists) return Mono.just("Тема " + finalTopic + " не существует");
+                return scheduleService.setGlobalSchedule(finalCron, finalTopic)
+                        .thenReturn("Расписание установлено: " + finalCron + " | Тема: " + finalTopic);
+            });
         } else if (params.equalsIgnoreCase("off")) {
             return scheduleService.disableGlobalSchedule().thenReturn("Автоматическая отправка отключена");
         } else if (params.equalsIgnoreCase("status")) {
+            String serverInfo = "\nВремя сервера: " + java.time.LocalDateTime.now().withNano(0)
+                    + "\nЧасовой пояс: " + java.time.ZoneId.systemDefault();
             return scheduleService.getGlobalSchedule()
-                    .map(s -> String.format("Состояние: %s\nCron: %s\nТема: %s",
-                            s.isActive() ? "активно" : "отключено",
-                            s.cronExpression(),
-                            s.topicName() != null ? s.topicName() : "не задана"))
-                    .switchIfEmpty(Mono.just("Расписание не задано"));
+                    .map(s -> {
+                        String result = "Состояние: " + (s.isActive() ? "активно" : "отключено")
+                                + "\nCron: " + s.cronExpression();
+                        if (s.topicName() != null) result += "\nТема: " + s.topicName();
+                        return result + serverInfo;
+                    })
+                    .switchIfEmpty(Mono.just("Расписание не задано" + serverInfo));
         }
         return Mono.just("Использование: \\schedule <set cron|off|status>");
     }
