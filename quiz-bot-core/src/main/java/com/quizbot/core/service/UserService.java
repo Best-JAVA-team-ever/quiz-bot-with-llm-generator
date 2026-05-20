@@ -15,4 +15,10 @@ public interface UserService {
     Flux<Users> findAllActive();
 
     Mono<Role> getRole(Long telegramId);
+
+    Mono<Users> findByTelegramId(Long telegramId);
+
+    Mono<Users> findById(String userId);
+
+    Mono<Users> resetScore(String userId);
 }

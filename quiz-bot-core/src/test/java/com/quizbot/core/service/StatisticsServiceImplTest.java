@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -38,7 +39,7 @@ class StatisticsServiceImplTest {
     @Mock
     private GroupMemberRepository groupMemberRepository;
     @Mock
-    private UserServiceImpl userService;
+    private UserService userService;
 
     private StatisticsServiceImpl statisticsService;
 
@@ -53,7 +54,7 @@ class StatisticsServiceImplTest {
         Answers correct = Answers.create("1", "q1", "A", true);
         Answers incorrect = Answers.create("1", "q2", "B", false);
 
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(1L)).thenReturn(Mono.just(user));
         when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class)))
                 .thenReturn(Flux.just(correct, incorrect));
 
@@ -71,7 +72,7 @@ class StatisticsServiceImplTest {
     void getUserStats_shouldReturnZeroPercentage_whenNoAnswers() {
         Users user = Users.create(1L, null);
 
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(1L)).thenReturn(Mono.just(user));
         when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class)))
                 .thenReturn(Flux.empty());
 
@@ -89,7 +90,7 @@ class StatisticsServiceImplTest {
         Question q1 = new Question("q1", "Q1", "A", List.of(), 1, null, null, List.of("Math"), Instant.now(), Instant.now(), null);
         Answers mathAnswer = Answers.create("1", "q1", "A", true);
 
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(1L)).thenReturn(Mono.just(user));
         when(questionRepository.findAllByTopicNamesContainingAndDeletedAtIsNull("Math")).thenReturn(Flux.just(q1));
         when(answersRepository.findAllByUserIdAndQuestionIdInAndAnsweredAtAfter(eq("1"), any(List.class), any(Instant.class)))
                 .thenReturn(Flux.just(mathAnswer));

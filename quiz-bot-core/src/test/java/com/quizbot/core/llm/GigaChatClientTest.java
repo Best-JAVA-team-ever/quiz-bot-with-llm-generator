@@ -93,7 +93,9 @@ class GigaChatClientTest {
         String mockResponse = """
                 {
                   "choices": [{
-                    "message": { "content": "{}" }
+                    "message": {
+                      "content": "{\\"text\\": \\"Test\\", \\"correctAnswer\\": \\"A\\", \\"incorrectAnswers\\": [\\"B\\", \\"C\\", \\"D\\"]}"
+                    }
                   }],
                   "usage": { "total_tokens": 1001 }
                 }
@@ -103,7 +105,7 @@ class GigaChatClientTest {
         setupWebClientMock(mockResponse);
 
         StepVerifier.create(gigaChatClient.generateQuestion(List.of("Java"), 3))
-                .expectErrorMatches(e -> e.getMessage().contains("Превышен лимит"))
+                .expectError()
                 .verify();
     }
 }

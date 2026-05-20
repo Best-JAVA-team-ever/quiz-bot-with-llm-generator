@@ -135,15 +135,17 @@ public class MessageDispatcher {
                     List<String> options = new ArrayList<>(q.wrongAnswers());
                     options.add(q.correctAnswer());
                     Collections.shuffle(options);
+                    context.setCurrentOptions(options);
 
                     StringBuilder sb = new StringBuilder();
                     sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
                     sb.append("Вопрос: ").append(q.text()).append("\n\n");
                     
                     List<List<BotResponse.Button>> keyboard = new ArrayList<>();
-                    for (String opt : options) {
-                        keyboard.add(List.of(new BotResponse.Button(opt, "\\ans_" + opt)));
+                    for (int i = 0; i < options.size(); i++) {
+                        keyboard.add(List.of(new BotResponse.Button(options.get(i), "\\ans_" + i)));
                     }
+                    keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
 
                     return Mono.just(BotResponse.buttons(sb.toString(), keyboard));
                 })
@@ -154,9 +156,20 @@ public class MessageDispatcher {
     }
 
     private Mono<BotResponse> processQuizAnswer(Long userId, ConversationContext context, String textIn) {
-        String text = textIn.startsWith("\\ans_") ? textIn.substring(5) : textIn;
         Question q = context.getActiveQuestion();
         if (q == null) return Mono.just(BotResponse.text("Викторина не активна"));
+
+        String text;
+        if (textIn.startsWith("\\ans_")) {
+            try {
+                int index = Integer.parseInt(textIn.substring(5));
+                text = context.getCurrentOptions().get(index);
+            } catch (Exception e) {
+                text = textIn.substring(5);
+            }
+        } else {
+            text = textIn;
+        }
 
         boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
@@ -178,8 +191,7 @@ public class MessageDispatcher {
                     return BotResponse.edit("Ответ корректный\n\n" + next.text(), next.keyboard());
                 });
             } else {
-                String msg = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer() +
-                        "\nПояснение: " + (q.explanation() != null ? q.explanation() : "нет");
+                String msg = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer();
                 List<List<BotResponse.Button>> keyboard = List.of(
                         List.of(new BotResponse.Button("Ок", "\\quiz_ok"),
                                 new BotResponse.Button("Объяснить", "\\quiz_explain"))
@@ -409,7 +421,8 @@ public class MessageDispatcher {
     }
 
     private Mono<BotResponse> handleScore(Long userId, ConversationContext context, String text) {
-        String param = text.replace("\\score", "").trim();
+        String[] parts = text.split(" ", 2);
+        String param = parts.length > 1 ? parts[1].trim() : "";
 
         if (param.equalsIgnoreCase("reset")) {
             context.setState(UserState.AWAITING_SCORE_RESET_CONFIRMATION);
@@ -845,7 +858,7 @@ public class MessageDispatcher {
     }
 
     private boolean isValidAnswer(String text) {
-        return text.matches("^[а-яА-Яa-zA-Z0-9\\s\\.,!?;:\\-\"\\'()]{2,32}$");
+        return text.matches("^[а-яА-Яa-zA-Z0-9\\s\\.,!?;:\\-\"\\'()]{2,64}$");
     }
 
     private Mono<String> handleGetQuestions(Users user, String text) {
@@ -890,9 +903,9 @@ public class MessageDispatcher {
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <ID> <новое_название>\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
+            return "Команды администратора:\n\\add tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\update tag <ID> <новое_название>\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         } else {
-            return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\help";
+            return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         }
     }
 }

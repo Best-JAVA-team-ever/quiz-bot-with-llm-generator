@@ -20,11 +20,11 @@ public class QuizServiceImpl implements QuizService {
 
         private final QuestionRepository questionRepository;
         private final AnswersRepository answersRepository;
-        private final UserServiceImpl userService;
+        private final UserService userService;
 
         public QuizServiceImpl(QuestionRepository questionRepository,
                         AnswersRepository answersRepository,
-                        UserServiceImpl userService) {
+                        UserService userService) {
                 this.questionRepository = questionRepository;
                 this.answersRepository = answersRepository;
                 this.userService = userService;
@@ -38,7 +38,7 @@ public class QuizServiceImpl implements QuizService {
                                 ? questionRepository.findAllByDeletedAtIsNull()
                                 : questionRepository.findAllByTopicNamesInAndDeletedAtIsNull(topics);
 
-                return userService.findById(userIdStr)
+                return userService.findByTelegramId(userId)
                                 .onErrorResume(e -> userService.getOrCreateUser(userId))
                                 .flatMap(user -> {
                                         Instant since = user.scoreResetAt() != null

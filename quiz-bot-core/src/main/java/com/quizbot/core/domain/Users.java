@@ -11,7 +11,7 @@ public record Users(
     @Id String id,
     @Indexed(unique = true) Long telegramId,
     Role role,
-    boolean isActive, 
+    Boolean isActive, 
     Instant registeredAt, 
     Instant scoreResetAt, 
     Instant deletedAt

@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -29,7 +30,7 @@ class QuizServiceImplTest {
     @Mock
     private AnswersRepository answersRepository;
     @Mock
-    private UserServiceImpl userService;
+    private UserService userService;
 
     private QuizServiceImpl quizService;
 
@@ -50,7 +51,7 @@ class QuizServiceImplTest {
         Answers a1 = Answers.create("1", "q1", "A", true);
 
         when(questionRepository.findAllByDeletedAtIsNull()).thenReturn(Flux.just(q1Saved, q2Saved));
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(anyLong())).thenReturn(Mono.just(user));
         when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class))).thenReturn(Flux.just(a1));
 
         StepVerifier.create(quizService.startQuiz(1L, null))
@@ -68,7 +69,7 @@ class QuizServiceImplTest {
         Users user = Users.create(1L, null);
 
         when(questionRepository.findAllByDeletedAtIsNull()).thenReturn(Flux.just(hard, easy1, easy2, easy3));
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(anyLong())).thenReturn(Mono.just(user));
         when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class))).thenReturn(Flux.empty());
 
         StepVerifier.create(quizService.startQuiz(1L, null))
@@ -83,7 +84,7 @@ class QuizServiceImplTest {
         Answers a1 = Answers.create("1", "q1", "A", true);
 
         when(questionRepository.findAllByDeletedAtIsNull()).thenReturn(Flux.just(q1));
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(anyLong())).thenReturn(Mono.just(user));
         when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class))).thenReturn(Flux.just(a1));
 
         StepVerifier.create(quizService.startQuiz(1L, null))
@@ -94,7 +95,7 @@ class QuizServiceImplTest {
     void startQuiz_shouldReturnEmpty_whenNoQuestionsExist() {
         Users user = Users.create(1L, null);
         when(questionRepository.findAllByDeletedAtIsNull()).thenReturn(Flux.empty());
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(anyLong())).thenReturn(Mono.just(user));
 
         StepVerifier.create(quizService.startQuiz(1L, null))
                 .verifyComplete();
@@ -106,7 +107,7 @@ class QuizServiceImplTest {
         Users user = Users.create(1L, null);
 
         when(questionRepository.findAllByTopicNamesInAndDeletedAtIsNull(List.of("Math"))).thenReturn(Flux.just(q1));
-        when(userService.findById("1")).thenReturn(Mono.just(user));
+        when(userService.findByTelegramId(anyLong())).thenReturn(Mono.just(user));
         when(answersRepository.findAllByUserIdAndAnsweredAtAfter(eq("1"), any(Instant.class))).thenReturn(Flux.empty());
 
         StepVerifier.create(quizService.startQuiz(1L, List.of("Math")))

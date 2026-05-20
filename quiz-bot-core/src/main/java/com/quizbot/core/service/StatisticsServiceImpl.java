@@ -23,13 +23,13 @@ public class StatisticsServiceImpl implements StatisticsService {
     private final QuestionRepository questionRepository;
     private final GroupRepository groupRepository;
     private final GroupMemberRepository groupMemberRepository;
-    private final UserServiceImpl userService;
+    private final UserService userService;
 
     public StatisticsServiceImpl(AnswersRepository answersRepository,
             QuestionRepository questionRepository,
             GroupRepository groupRepository,
             GroupMemberRepository groupMemberRepository,
-            UserServiceImpl userService) {
+            UserService userService) {
         this.answersRepository = answersRepository;
         this.questionRepository = questionRepository;
         this.groupRepository = groupRepository;
@@ -42,7 +42,7 @@ public class StatisticsServiceImpl implements StatisticsService {
         String userIdStr = String.valueOf(userId);
 
         if (topicName != null && !topicName.isEmpty()) {
-            return userService.findById(userIdStr).flatMap(user ->
+            return userService.findByTelegramId(userId).flatMap(user ->
                 questionRepository
                     .findAllByTopicNamesContainingAndDeletedAtIsNull(topicName)
                     .map(Question::id)
@@ -56,7 +56,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                         .map(StatisticsServiceImpl::calculateStats)));
         }
 
-        return userService.findById(userIdStr).flatMap(user ->
+        return userService.findByTelegramId(userId).flatMap(user ->
             answersRepository
                 .findAllByUserIdAndAnsweredAtAfter(
                     userIdStr,
@@ -104,7 +104,7 @@ public class StatisticsServiceImpl implements StatisticsService {
     // --- дополнительные методы, используемые внутри модуля ---
 
     public Mono<Long> countCorrectByUserAndTopic(String userId, String topicName) {
-        return userService.findById(userId).flatMap(user ->
+        return userService.findByTelegramId(Long.parseLong(userId)).flatMap(user ->
             questionRepository
                 .findAllByTopicNamesContainingAndDeletedAtIsNull(topicName)
                 .map(Question::id)

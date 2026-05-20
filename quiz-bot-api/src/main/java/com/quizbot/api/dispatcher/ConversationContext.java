@@ -23,6 +23,7 @@ public class ConversationContext {
     private int updateFieldIndex = 0;
     private Question pendingQuestion;
     private Question activeQuestion;
+    private List<String> currentOptions = new ArrayList<>();
 
     public ConversationContext() {}
 
@@ -69,6 +70,9 @@ public class ConversationContext {
     public Question getActiveQuestion() { return activeQuestion; }
     public void setActiveQuestion(Question activeQuestion) { this.activeQuestion = activeQuestion; }
 
+    public List<String> getCurrentOptions() { return currentOptions; }
+    public void setCurrentOptions(List<String> currentOptions) { this.currentOptions = currentOptions; }
+
     public void reset() {
         state = UserState.IDLE;
         pendingTopics = new ArrayList<>();
@@ -82,5 +86,6 @@ public class ConversationContext {
         updateFieldIndex = 0;
         pendingQuestion = null;
         activeQuestion = null;
+        currentOptions = new ArrayList<>();
     }
 }
