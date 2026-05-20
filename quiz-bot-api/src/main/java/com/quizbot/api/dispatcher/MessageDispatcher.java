@@ -432,25 +432,42 @@ public class MessageDispatcher {
     private Mono<String> handleSchedule(String text) {
         String params = text.replace("\\schedule", "").trim();
         if (params.startsWith("set")) {
-            String cron = params.replace("set", "").trim();
+            String rest = params.substring(3).trim();
+            String[] tokens = rest.split("\\s+");
+            if (tokens.length < 6) {
+                return Mono.just("Использование: \\schedule set <сек мин час день месяц день_недели> [тема]");
+            }
+            String cron = String.join(" ", tokens[0], tokens[1], tokens[2], tokens[3], tokens[4], tokens[5]);
+            String topic = tokens.length > 6 ? tokens[6] : null;
             try {
                 org.springframework.scheduling.support.CronExpression.parse(cron);
-                return scheduleService.setGlobalSchedule(cron, null).thenReturn("Расписание установлено: " + cron);
             } catch (Exception e) {
                 return Mono.just("Некорректное cron-выражение");
             }
+            if (topic != null) {
+                return topicService.exists(topic).flatMap(exists -> {
+                    if (!exists) return Mono.just("Тема \"" + topic + "\" не найдена");
+                    return scheduleService.setGlobalSchedule(cron, topic)
+                            .thenReturn("Расписание установлено: " + cron + " | тема: " + topic + " (время МСК)");
+                });
+            }
+            return scheduleService.setGlobalSchedule(cron, null)
+                    .thenReturn("Расписание установлено: " + cron + " (время МСК)");
         } else if (params.equalsIgnoreCase("off")) {
             return scheduleService.disableGlobalSchedule().thenReturn("Автоматическая отправка отключена");
         } else if (params.equalsIgnoreCase("status")) {
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Moscow"));
+            String timeStr = now.toLocalDateTime().withNano(0) + " (МСК)";
             return scheduleService.getGlobalSchedule()
                     .map(s -> {
                         String result = "Состояние: " + (s.isActive() ? "активно" : "отключено")
-                                + "\nCron: " + s.cronExpression();
+                                + "\nCron: " + s.cronExpression()
+                                + "\nВремя сервера: " + timeStr;
                         if (s.topicName() != null)
                             result += "\nТема: " + s.topicName();
                         return result;
                     })
-                    .switchIfEmpty(Mono.just("Расписание не задано"));
+                    .switchIfEmpty(Mono.just("Расписание не задано\nВремя сервера: " + timeStr));
         }
         return Mono.just("Использование: \\schedule <set cron|off|status>");
     }
