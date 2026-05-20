@@ -35,26 +35,36 @@ public class GigaChatClient implements LlmClient {
 
     public GigaChatClient(org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider,
                           GigaChatAuthService authService) {
+        this(meterRegistryProvider, authService, null);
+    }
+
+    public GigaChatClient(org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider,
+                          GigaChatAuthService authService,
+                          WebClient webClient) {
         this.meterRegistry = meterRegistryProvider.getIfAvailable();
         this.authService = authService;
         this.objectMapper = new ObjectMapper();
 
-        SslContext sslContext;
-        try {
-            sslContext = SslContextBuilder.forClient()
-                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
+        if (webClient == null) {
+            SslContext sslContext;
+            try {
+                sslContext = SslContextBuilder.forClient()
+                        .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                        .build();
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to create SSL Context", e);
+            }
+
+            HttpClient httpClient = HttpClient.create().secure(t -> t.sslContext(sslContext));
+
+            this.webClient = WebClient.builder()
+                    .clientConnector(new ReactorClientHttpConnector(httpClient))
+                    .baseUrl("https://gigachat.devices.sberbank.ru/api/v1")
+                    .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .build();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create SSL Context", e);
+        } else {
+            this.webClient = webClient;
         }
-
-        HttpClient httpClient = HttpClient.create().secure(t -> t.sslContext(sslContext));
-
-        this.webClient = WebClient.builder()
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .baseUrl("https://gigachat.devices.sberbank.ru/api/v1")
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .build();
         log.info("GigaChatClient initialized.");
     }
 

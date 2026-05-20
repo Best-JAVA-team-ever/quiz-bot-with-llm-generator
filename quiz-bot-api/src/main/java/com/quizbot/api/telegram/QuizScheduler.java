@@ -1,5 +1,6 @@
 package com.quizbot.api.telegram;
 
+import com.quizbot.api.dispatcher.BotResponse;
 import com.quizbot.core.domain.Question;
 import com.quizbot.core.domain.QuizSchedule;
 import com.quizbot.core.service.QuestionService;
@@ -118,23 +119,27 @@ public class QuizScheduler {
         userService.getAllUsers().subscribe(user -> {
             quizService.startQuiz(user.telegramId(), topics).subscribe(q -> {
                 if (q != null) {
-                    String message = formatQuestion(q);
-                    telegramBot.sendText(user.telegramId(), "Автоматический вопрос дня!\n\n" + message);
+                    BotResponse response = formatQuestion(q);
+                    String header = "Автоматический вопрос дня!\n\n";
+                    BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
+                    telegramBot.sendResponse(user.telegramId(), null, headeredResponse);
                 }
             });
         });
     }
 
-    private String formatQuestion(Question q) {
+    private BotResponse formatQuestion(Question q) {
         List<String> options = new java.util.ArrayList<>(q.wrongAnswers());
         options.add(q.correctAnswer());
         Collections.shuffle(options);
         
         StringBuilder sb = new StringBuilder();
+        sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
         sb.append("Вопрос: ").append(q.text()).append("\n\n");
-        for (int i = 0; i < options.size(); i++) {
-            sb.append(i + 1).append(". ").append(options.get(i)).append("\n");
+        List<List<BotResponse.Button>> keyboard = new java.util.ArrayList<>();
+        for (String opt : options) {
+            keyboard.add(List.of(new BotResponse.Button(opt, "\\ans_" + opt)));
         }
-        return sb.toString();
+        return BotResponse.buttons(sb.toString(), keyboard);
     }
 }
