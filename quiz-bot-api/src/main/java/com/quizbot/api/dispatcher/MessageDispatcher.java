@@ -109,6 +109,7 @@ public class MessageDispatcher {
                         else if (text.startsWith("\\update tag") && isAdmin) actionMono = handleUpdateTag(userId, text).map(BotResponse::text);
                         else if (text.startsWith("\\delete tag") && isAdmin) actionMono = handleDeleteTag(text).map(BotResponse::text);
                         else if (text.startsWith("\\schedule") && isAdmin) actionMono = handleSchedule(text, context).map(BotResponse::text);
+                        else if (text.startsWith("\\get users") && isAdmin) actionMono = handleGetUsers().map(BotResponse::text);
                         else if (text.startsWith("\\group")) actionMono = handleGroup(user, context, text);
                         else if (text.startsWith("\\get questions")) actionMono = handleGetQuestions(user, text).map(BotResponse::text);
                         else if (text.startsWith("\\quiz start")) actionMono = startQuiz(userId, context, text);
@@ -1094,6 +1095,13 @@ public class MessageDispatcher {
         }
     }
 
+    private Mono<String> handleGetUsers() {
+        return userService.getAllUsers()
+                .map(u -> "ID: " + u.telegramId() + " | Роль: " + u.role())
+                .collectList()
+                .map(list -> list.isEmpty() ? "Пользователей нет." : String.join("\n", list));
+    }
+
     private String formatQuestionList(List<Question> questions) {
         if (questions.isEmpty())
             return "Список пуст.";
@@ -1114,7 +1122,7 @@ public class MessageDispatcher {
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule topic <тема|all>\n\\schedule off\n\\schedule status\n\\schedule run now\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
+            return "Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\get users\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         } else {
             return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         }
