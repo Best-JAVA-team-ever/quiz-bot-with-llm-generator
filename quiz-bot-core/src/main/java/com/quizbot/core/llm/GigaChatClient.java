@@ -11,6 +11,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -35,6 +36,7 @@ public class GigaChatClient implements LlmClient {
     private final LlmLogService llmLogService;
     private final java.util.concurrent.atomic.AtomicLong lastRequestTime = new java.util.concurrent.atomic.AtomicLong(0);
 
+    @Autowired
     public GigaChatClient(org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider,
                           GigaChatAuthService authService,
                           LlmLogService llmLogService) {
