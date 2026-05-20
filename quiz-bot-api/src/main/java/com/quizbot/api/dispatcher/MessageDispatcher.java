@@ -431,10 +431,13 @@ public class MessageDispatcher {
             return scheduleService.disableGlobalSchedule().thenReturn("Автоматическая отправка отключена");
         } else if (params.equalsIgnoreCase("status")) {
             return scheduleService.getGlobalSchedule()
-                    .map(s -> String.format("Состояние: %s\nCron: %s\nТема: %s",
-                            s.isActive() ? "активно" : "отключено",
-                            s.cronExpression(),
-                            s.topicName() != null ? s.topicName() : "не задана"))
+                    .map(s -> {
+                        String result = "Состояние: " + (s.isActive() ? "активно" : "отключено")
+                                + "\nCron: " + s.cronExpression();
+                        if (s.topicName() != null)
+                            result += "\nТема: " + s.topicName();
+                        return result;
+                    })
                     .switchIfEmpty(Mono.just("Расписание не задано"));
         }
         return Mono.just("Использование: \\schedule <set cron|off|status>");
@@ -625,16 +628,26 @@ public class MessageDispatcher {
             if (!topicService.isValid(t))
                 return Mono.just(BotResponse.text(t + " — некорректное название темы"));
         }
-        context.setPendingTopics(topics);
-        context.setState(UserState.AWAITING_GENERATION_DIFFICULTY);
-        List<List<BotResponse.Button>> keyboard = List.of(List.of(
-                new BotResponse.Button("1", "1"),
-                new BotResponse.Button("2", "2"),
-                new BotResponse.Button("3", "3"),
-                new BotResponse.Button("4", "4"),
-                new BotResponse.Button("5", "5")
-        ));
-        return Mono.just(BotResponse.buttons("Выберите уровень сложности", keyboard));
+        return Flux.fromIterable(topics)
+                .flatMap(t -> topicService.exists(t).flatMap(exists -> {
+                    if (exists) return Mono.just("");
+                    return topicService.addTopic(t).map(newTopic -> "Добавлена новая тема " + t);
+                }))
+                .filter(s -> !s.isEmpty())
+                .collectList()
+                .flatMap(newTopicMessages -> {
+                    context.setPendingTopics(topics);
+                    context.setState(UserState.AWAITING_GENERATION_DIFFICULTY);
+                    String prefix = newTopicMessages.isEmpty() ? "" : String.join("\n", newTopicMessages) + "\n";
+                    List<List<BotResponse.Button>> keyboard = List.of(List.of(
+                            new BotResponse.Button("1", "1"),
+                            new BotResponse.Button("2", "2"),
+                            new BotResponse.Button("3", "3"),
+                            new BotResponse.Button("4", "4"),
+                            new BotResponse.Button("5", "5")
+                    ));
+                    return Mono.just(BotResponse.buttons(prefix + "Выберите уровень сложности", keyboard));
+                });
     }
 
     private Mono<BotResponse> handleConversation(Users user, ConversationContext context, String text) {

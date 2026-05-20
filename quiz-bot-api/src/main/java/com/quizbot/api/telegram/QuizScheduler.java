@@ -40,6 +40,7 @@ public class QuizScheduler {
     private final GroupService groupService;
     
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
+    private final Map<String, String> scheduledCrons = new ConcurrentHashMap<>();
 
     public QuizScheduler(ScheduleService scheduleService, 
                          UserService userService, 
@@ -101,8 +102,10 @@ public class QuizScheduler {
     private void syncSchedule(QuizSchedule schedule) {
         if (schedule == null) return;
         String taskId = schedule.id();
+
         if (!schedule.isActive()) {
             ScheduledFuture<?> future = scheduledTasks.remove(taskId);
+            scheduledCrons.remove(taskId);
             if (future != null) {
                 future.cancel(false);
                 log.info("Cancelled schedule {}", taskId);
@@ -110,17 +113,29 @@ public class QuizScheduler {
             return;
         }
 
-        ScheduledFuture<?> existing = scheduledTasks.get(taskId);
-        if (existing == null) {
-            scheduleTask(schedule);
+        String existingCron = scheduledCrons.get(taskId);
+        if (existingCron != null && existingCron.equals(schedule.cronExpression())) {
+            return;
         }
+
+        ScheduledFuture<?> old = scheduledTasks.remove(taskId);
+        scheduledCrons.remove(taskId);
+        if (old != null) {
+            old.cancel(false);
+            log.info("Rescheduling {} (cron changed: {} → {})", taskId, existingCron, schedule.cronExpression());
+        }
+
+        scheduleTask(schedule);
     }
 
     private void scheduleTask(QuizSchedule schedule) {
         try {
-            ScheduledFuture<?> future = taskScheduler.schedule(() -> runScheduledQuiz(schedule), new CronTrigger(schedule.cronExpression()));
+            ScheduledFuture<?> future = taskScheduler.schedule(
+                    () -> runScheduledQuiz(schedule),
+                    new CronTrigger(schedule.cronExpression()));
             scheduledTasks.put(schedule.id(), future);
-            log.info("Scheduled new task {} with cron {}", schedule.id(), schedule.cronExpression());
+            scheduledCrons.put(schedule.id(), schedule.cronExpression());
+            log.info("Scheduled task {} with cron {}", schedule.id(), schedule.cronExpression());
         } catch (Exception e) {
             log.error("Failed to schedule task with cron: {}", schedule.cronExpression(), e);
         }
@@ -129,29 +144,28 @@ public class QuizScheduler {
     private void runScheduledQuiz(QuizSchedule schedule) {
         log.info("Executing scheduled quiz for schedule: {}", schedule.id());
         List<String> topics = schedule.topicName() != null ? List.of(schedule.topicName()) : List.of();
-        
+
         if (schedule.id().startsWith("group:")) {
             String groupId = schedule.id().substring(6);
-            groupService.findMembers(groupId).subscribe(member -> {
-                long telegramId = Long.parseLong(member.userId());
-                sendScheduledQuestion(telegramId, topics);
-            });
+            groupService.findMembers(groupId).subscribe(
+                    member -> sendScheduledQuestion(Long.parseLong(member.userId()), topics),
+                    e -> log.error("Error fetching members for group {}: {}", groupId, e.getMessage()));
         } else {
-            userService.findAllActive().subscribe(user -> {
-                sendScheduledQuestion(user.telegramId(), topics);
-            });
+            userService.findAllActive().subscribe(
+                    user -> sendScheduledQuestion(user.telegramId(), topics),
+                    e -> log.error("Error fetching active users: {}", e.getMessage()));
         }
     }
 
     private void sendScheduledQuestion(long telegramId, List<String> topics) {
-        quizService.startQuiz(telegramId, topics).subscribe(q -> {
-            if (q != null) {
-                BotResponse response = formatQuestion(q);
-                String header = "Автоматический вопрос дня!\n\n";
-                BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
-                telegramBot.sendResponse(telegramId, null, headeredResponse);
-            }
-        });
+        quizService.startQuiz(telegramId, topics).subscribe(
+                q -> {
+                    BotResponse response = formatQuestion(q);
+                    String header = "Автоматический вопрос дня!\n\n";
+                    BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
+                    telegramBot.sendResponse(telegramId, null, headeredResponse);
+                },
+                e -> log.error("Error picking question for user {}: {}", telegramId, e.getMessage()));
     }
 
     private BotResponse formatQuestion(Question q) {
