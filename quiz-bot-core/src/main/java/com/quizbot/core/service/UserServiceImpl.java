@@ -81,7 +81,7 @@ public class UserServiceImpl implements UserService {
     }
 
     public Mono<Users> resetScore(String userId) {
-        return usersRepository.findByIdAndDeletedAtIsNull(userId)
+        return usersRepository.findByTelegramIdAndDeletedAtIsNull(Long.parseLong(userId))
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
                 .flatMap(user -> {
                     Users updated = user.withScoreResetAt(Instant.now());

@@ -64,6 +64,10 @@ public class MessageDispatcher {
         log.info("Received command from user {}: {}", userId, text);
 
         return contextRepository.findById(userId)
+                .onErrorResume(e -> {
+                    log.error("Ошибка загрузки контекста для пользователя {}: {}", userId, e.getMessage());
+                    return Mono.just(new ConversationContext(userId));
+                })
                 .defaultIfEmpty(new ConversationContext(userId))
                 .flatMap(context -> {
                     if (text.equalsIgnoreCase("\\cancel")) {
@@ -82,6 +86,12 @@ public class MessageDispatcher {
                         }
                         if (context.getState() != UserState.IDLE) {
                             return handleConversation(user, context, text)
+                                    .onErrorResume(e -> {
+                                        log.error("Ошибка в диалоге пользователя {}: {}", userId, e.getMessage());
+                                        context.reset();
+                                        return contextRepository.save(context)
+                                                .thenReturn(BotResponse.text("Произошла ошибка. Действие прервано."));
+                                    })
                                     .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
                         }
 
@@ -105,7 +115,14 @@ public class MessageDispatcher {
                         else if (text.equalsIgnoreCase("\\help")) actionMono = Mono.just(BotResponse.text(handleHelp(user)));
                         else actionMono = Mono.just(BotResponse.text("Неизвестная команда. Введите \\help для списка доступных команд."));
 
-                        return actionMono.flatMap(resp -> contextRepository.save(context).thenReturn(resp));
+                        return actionMono
+                                .onErrorResume(e -> {
+                                    log.error("Ошибка при обработке команды '{}' от пользователя {}: {}", text, userId, e.getMessage());
+                                    context.reset();
+                                    return contextRepository.save(context)
+                                            .thenReturn(BotResponse.text("Произошла внутренняя ошибка. Попробуйте ещё раз."));
+                                })
+                                .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
                     });
                 });
     }
@@ -896,8 +913,10 @@ public class MessageDispatcher {
             return "Список пуст.";
         return questions.stream()
                 .map(q -> String.format("ID: %s | Сложность: %d | Тема: %s\nQ: %s\nПравильный: %s\nНеправильные: %s",
-                        q.id(), q.difficulty(), String.join(", ", q.topicNames()),
-                        q.text(), q.correctAnswer(), String.join(", ", q.wrongAnswers())))
+                        q.id(), q.difficulty(),
+                        q.topicNames() != null ? String.join(", ", q.topicNames()) : "—",
+                        q.text(), q.correctAnswer(),
+                        q.wrongAnswers() != null ? String.join(", ", q.wrongAnswers()) : "—"))
                 .collect(Collectors.joining("\n---\n"));
     }
 
