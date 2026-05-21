@@ -140,9 +140,26 @@ public class GigaChatClient implements LlmClient {
     }
 
     private String extractJson(String text) {
-        int start = text.indexOf("{");
-        int end = text.lastIndexOf("}");
-        if (start != -1 && end != -1 && end > start) {
+        if (text == null) return "";
+        int startObj = text.indexOf("{");
+        int startArr = text.indexOf("[");
+        int start;
+        
+        if (startObj != -1 && startArr != -1) start = Math.min(startObj, startArr);
+        else if (startObj != -1) start = startObj;
+        else if (startArr != -1) start = startArr;
+        else return text;
+        
+        int endObj = text.lastIndexOf("}");
+        int endArr = text.lastIndexOf("]");
+        int end;
+        
+        if (endObj != -1 && endArr != -1) end = Math.max(endObj, endArr);
+        else if (endObj != -1) end = endObj;
+        else if (endArr != -1) end = endArr;
+        else return text;
+
+        if (end > start) {
             return text.substring(start, end + 1);
         }
         return text;
@@ -183,15 +200,9 @@ public class GigaChatClient implements LlmClient {
                     try {
                         JsonNode root = objectMapper.readTree(response);
                         String content = root.path("choices").get(0).path("message").path("content").asText();
+                        String jsonOnly = extractJson(content);
 
-                        if (content.startsWith("```json")) {
-                            content = content.substring(7);
-                            if (content.endsWith("```")) {
-                                content = content.substring(0, content.length() - 3);
-                            }
-                        }
-
-                        JsonNode arrayNode = objectMapper.readTree(content);
+                        JsonNode arrayNode = objectMapper.readTree(jsonOnly);
                         List<DifficultyUpdate> updates = new ArrayList<>();
                         if (arrayNode.isArray()) {
                             for (JsonNode node : arrayNode) {

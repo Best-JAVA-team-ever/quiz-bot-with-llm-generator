@@ -62,7 +62,6 @@ public class MessageDispatcher {
 
     public Mono<BotResponse> handleCommand(Long userId, String textIn) {
         String text = textIn.startsWith("/") ? "\\" + textIn.substring(1) : textIn;
-        log.info("Received command from user {}: {}", userId, text);
 
         return contextRepository.findById(userId)
                 .onErrorResume(e -> {
@@ -71,6 +70,7 @@ public class MessageDispatcher {
                 })
                 .defaultIfEmpty(new ConversationContext(userId))
                 .flatMap(context -> {
+                    log.info("Received command from user {}: {} (currentState: {})", userId, text, context.getState());
                     if (text.equalsIgnoreCase("\\cancel")) {
                         context.reset();
                         return contextRepository.save(context).thenReturn(BotResponse.text("Действие отменено"));

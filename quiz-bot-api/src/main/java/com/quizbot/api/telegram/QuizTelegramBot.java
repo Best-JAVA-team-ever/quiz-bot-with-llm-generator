@@ -2,6 +2,8 @@ package com.quizbot.api.telegram;
 
 import com.quizbot.api.dispatcher.BotResponse;
 import com.quizbot.api.dispatcher.MessageDispatcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -21,7 +23,7 @@ import java.util.List;
 @Component
 public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(QuizTelegramBot.class);
+    private static final Logger log = LoggerFactory.getLogger(QuizTelegramBot.class);
 
     private final MessageDispatcher messageDispatcher;
     private final TelegramClient telegramClient;

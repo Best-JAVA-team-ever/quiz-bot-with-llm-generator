@@ -265,13 +265,23 @@ public class QuizScheduler {
         List<List<BotResponse.Button>> keyboard = new java.util.ArrayList<>();
         if (options != null) {
             for (int i = 0; i < options.size(); i++) {
-                keyboard.add(List.of(new BotResponse.Button(options.get(i), "\\ans_" + i)));
+                String optText = options.get(i);
+                if (optText != null) {
+                    keyboard.add(List.of(new BotResponse.Button(optText, "\\ans_" + i)));
+                }
             }
         }
         keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
 
         StringBuilder sb = new StringBuilder();
-        String topicsStr = (q.topicNames() != null ? String.join(", ", q.topicNames()) : "—");
+        List<String> tNames = q.topicNames();
+        String topicsStr;
+        if (tNames == null || tNames.isEmpty()) {
+            topicsStr = "—";
+        } else {
+            topicsStr = tNames.stream().filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.joining(", "));
+        }
+        
         sb.append("Темы: ").append(escapeHtml(topicsStr)).append("\n");
         sb.append("Вопрос: ").append(escapeHtml(q.text() != null ? q.text() : "—")).append("\n");
         if (q.hint() != null && !q.hint().isEmpty()) {
