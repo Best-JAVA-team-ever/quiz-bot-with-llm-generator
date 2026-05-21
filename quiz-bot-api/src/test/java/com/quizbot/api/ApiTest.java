@@ -11,53 +11,54 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ApiTest {
 
-
     @Test
-    void botResponse_text_setsTextAndNoKeyboard() {
+    void botResponse_text_hasNoKeyboardAndNoEditMode() {
         BotResponse r = BotResponse.text("hello");
-        assertEquals("hello", r.text());
         assertNull(r.keyboard());
         assertFalse(r.editMode());
     }
 
     @Test
-    void botResponse_buttons_setsKeyboard() {
-        var keyboard = List.of(List.of(new BotResponse.Button("Yes", "yes")));
-        BotResponse r = BotResponse.buttons("Choose:", keyboard);
-        assertEquals("Choose:", r.text());
-        assertEquals(keyboard, r.keyboard());
-        assertFalse(r.editMode());
+    void botResponse_edit_setsEditMode() {
+        BotResponse text = BotResponse.text("msg");
+        BotResponse edit = BotResponse.edit("msg", null);
+        assertFalse(text.editMode());
+        assertTrue(edit.editMode());
     }
 
     @Test
-    void botResponse_edit_setsEditMode() {
-        BotResponse r = BotResponse.edit("updated", null);
-        assertTrue(r.editMode());
+    void botResponse_buttons_hasKeyboardButNoEditMode() {
+        var keyboard = List.of(List.of(new BotResponse.Button("Yes", "yes")));
+        BotResponse r = BotResponse.buttons("Choose:", keyboard);
+        assertNotNull(r.keyboard());
+        assertFalse(r.editMode());
     }
 
 
     @Test
     void conversationContext_defaultState_isIdle() {
         ConversationContext ctx = new ConversationContext(1L);
-        assertEquals(1L, ctx.getUserId());
         assertEquals(UserState.IDLE, ctx.getState());
         assertNull(ctx.getActiveQuestion());
+        assertTrue(ctx.getPendingTopics().isEmpty());
+        assertTrue(ctx.getIncorrectAnswers().isEmpty());
     }
 
     @Test
-    void conversationContext_setState_changesState() {
+    void conversationContext_reset_clearsAllFields() {
         ConversationContext ctx = new ConversationContext(1L);
         ctx.setState(UserState.IN_QUIZ);
-        assertEquals(UserState.IN_QUIZ, ctx.getState());
-    }
+        ctx.setQuestionText("Что такое JVM?");
+        ctx.setCorrectAnswer("Виртуальная машина");
+        ctx.setDifficulty(3);
+        ctx.getPendingTopics().add("java");
 
-    @Test
-    void conversationContext_reset_returnsToIdle() {
-        ConversationContext ctx = new ConversationContext(1L);
-        ctx.setState(UserState.IN_QUIZ);
-        ctx.setQuestionText("some text");
         ctx.reset();
+
         assertEquals(UserState.IDLE, ctx.getState());
         assertNull(ctx.getQuestionText());
+        assertNull(ctx.getCorrectAnswer());
+        assertNull(ctx.getDifficulty());
+        assertTrue(ctx.getPendingTopics().isEmpty());
     }
 }

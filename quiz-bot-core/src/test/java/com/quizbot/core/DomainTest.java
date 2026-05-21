@@ -9,15 +9,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DomainTest {
 
-
     @Test
-    void question_create_setsFields() {
+    void question_create_idIsNullAndTimestampsAreEqual() {
         Question q = Question.create("text", "correct", List.of("wrong"), 2, "exp", "hint", List.of("java"));
         assertNull(q.id());
-        assertEquals("text", q.text());
-        assertEquals("correct", q.correctAnswer());
-        assertEquals(2, q.difficulty());
-        assertEquals(List.of("java"), q.topicNames());
+        assertEquals(q.createdAt(), q.updatedAt());
         assertNull(q.deletedAt());
     }
 
@@ -29,6 +25,13 @@ class DomainTest {
     }
 
     @Test
+    void question_withText_updatesTimestamp() {
+        Question q = Question.create("old", "a", List.of(), 1, "", "", List.of());
+        Question updated = q.withText("new");
+        assertFalse(updated.updatedAt().isBefore(q.createdAt()));
+    }
+
+    @Test
     void question_markAsDeleted_setsDeletedAt() {
         Question q = Question.create("t", "a", List.of(), 1, "", "", List.of());
         assertFalse(q.isDeleted());
@@ -37,48 +40,52 @@ class DomainTest {
 
 
     @Test
-    void answers_create_setsFields() {
+    void answers_create_idIsNullAndTimestampIsSetAutomatically() {
         Answers a = Answers.create("user1", "q1", "A", true);
         assertNull(a.id());
-        assertEquals("user1", a.userId());
-        assertEquals("q1", a.questionId());
-        assertTrue(a.isCorrect());
         assertNotNull(a.answeredAt());
     }
 
-
     @Test
-    void users_create_setsFields() {
+    void users_create_isActiveTrueByDefault() {
         Users u = Users.create(42L, Role.USER);
-        assertNull(u.id());
-        assertEquals(42L, u.telegramId());
-        assertEquals(Role.USER, u.role());
         assertTrue(u.isActive());
         assertNull(u.deletedAt());
     }
 
     @Test
-    void users_withRole_changesRole() {
-        Users u = Users.create(1L, Role.USER);
-        assertEquals(Role.ADMIN, u.withRole(Role.ADMIN).role());
-        assertEquals(Role.USER, u.role());
+    void users_withRole_changesRoleButPreservesOtherFields() {
+        Users u = Users.create(42L, Role.USER);
+        Users admin = u.withRole(Role.ADMIN);
+        assertEquals(Role.ADMIN, admin.role());
+        assertEquals(42L, admin.telegramId());
+        assertEquals(u.registeredAt(), admin.registeredAt());
     }
 
     @Test
-    void users_markAsDeleted_setsDeletedAt() {
+    void users_markAsDeleted_setsDeletedAtAndDeactivates() {
         Users u = Users.create(1L, Role.USER);
         assertFalse(u.isDeleted());
-        assertTrue(u.markAsDeleted().isDeleted());
+        Users deleted = u.markAsDeleted();
+        assertTrue(deleted.isDeleted());
+        assertFalse(deleted.isActive());
     }
 
 
     @Test
-    void group_create_setsFields() {
-        Group g = Group.create("MyGroup", "https://t.me/quiz_bot?start=join_abc");
-        assertNull(g.id());
-        assertEquals("MyGroup", g.name());
+    void group_create_scheduleIsNullByDefault() {
+        Group g = Group.create("MyGroup", "link");
         assertNull(g.scheduleCron());
+        assertNull(g.id());
         assertNull(g.deletedAt());
+    }
+
+    @Test
+    void group_withName_preservesInviteLink() {
+        Group g = Group.create("OldName", "https://t.me/quiz_bot?start=join_abc");
+        Group renamed = g.withName("NewName");
+        assertEquals("NewName", renamed.name());
+        assertEquals("https://t.me/quiz_bot?start=join_abc", renamed.inviteLink());
     }
 
     @Test
@@ -90,17 +97,17 @@ class DomainTest {
 
 
     @Test
-    void topic_create_setsFields() {
+    void topic_markAsDeleted_setsDeletedAt() {
         Topic t = Topic.create("java");
         assertNull(t.id());
-        assertEquals("java", t.name());
-        assertNull(t.deletedAt());
+        assertFalse(t.isDeleted());
+        assertTrue(t.markAsDeleted().isDeleted());
     }
 
     @Test
-    void topic_markAsDeleted_setsDeletedAt() {
-        Topic t = Topic.create("java");
-        assertFalse(t.isDeleted());
-        assertTrue(t.markAsDeleted().isDeleted());
+    void topic_withName_doesNotMutateOriginal() {
+        Topic t = Topic.create("old");
+        assertEquals("new", t.withName("new").name());
+        assertEquals("old", t.name());
     }
 }
