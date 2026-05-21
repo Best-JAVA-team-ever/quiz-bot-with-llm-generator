@@ -93,10 +93,10 @@ The application will be available on port `8080`.
 
 ### Docker Hub
 
-The project image is published on Docker Hub (<link>). You can run it without building locally:
+The project image is published on Docker Hub (https://hub.docker.com/repository/docker/shishmak/shishmak). You can run it without building locally:
 
 ```bash
-
+docker push shishmak/shishmak:latest
 ```
 
 Or run it directly with `docker run`:
