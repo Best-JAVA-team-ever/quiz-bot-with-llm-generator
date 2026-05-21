@@ -112,7 +112,17 @@ public class MessageDispatcher {
                         else if (text.startsWith("\\schedule") && isAdmin) actionMono = handleSchedule(text, context).map(BotResponse::text);
                         else if (text.startsWith("\\get users") && isAdmin) actionMono = handleGetUsers().map(BotResponse::text);
                         else if (text.startsWith("\\group")) actionMono = handleGroup(user, context, text);
-                        else if (text.startsWith("\\get questions")) actionMono = handleGetQuestions(user, text).map(BotResponse::text);
+                        else if (text.startsWith("\\get questions")) actionMono = handleGetQuestions(user, text)
+                                .flatMap(fullText -> Mono.fromCallable(() -> {
+                                    List<String> chunks = splitIntoChunks(fullText, 4000);
+                                    for (int i = 0; i < chunks.size() - 1; i++) {
+                                        telegramClient.execute(SendMessage.builder()
+                                                .chatId(String.valueOf(userId))
+                                                .text(chunks.get(i))
+                                                .build());
+                                    }
+                                    return BotResponse.text(chunks.get(chunks.size() - 1));
+                                }).subscribeOn(Schedulers.boundedElastic()));
                         else if (text.startsWith("\\quiz start")) actionMono = startQuiz(userId, context, text);
                         else if (text.startsWith("\\score")) actionMono = handleScore(userId, context, text);
                         else if (text.equalsIgnoreCase("\\help")) actionMono = Mono.just(BotResponse.text(handleHelp(user)));
@@ -832,22 +842,28 @@ public class MessageDispatcher {
                     if (diff < 1 || diff > 5)
                         throw new Exception();
                     context.setDifficulty(diff);
-                    String genNotice = "Генерация вопроса по теме(ам) " +
-                            String.join(", ", context.getPendingTopics()) +
-                            " с уровнем сложности " + diff;
-                    
-                    return Mono.fromRunnable(() -> {
-                        try {
-                            telegramClient.execute(SendMessage.builder()
-                                    .chatId(String.valueOf(user.telegramId()))
-                                    .text(genNotice)
-                                    .parseMode("HTML")
-                                    .build());
-                        } catch (TelegramApiException ex) {
-                            log.warn("Не удалось отправить уведомление о генерации: {}", ex.getMessage());
-                        }
-                    }).subscribeOn(Schedulers.boundedElastic())
-                    .then(performGeneration(context));
+                    performGeneration(context)
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .subscribe(result -> {
+                                if (context.getState() == UserState.AWAITING_GENERATION_DIFFICULTY) {
+                                    context.reset();
+                                }
+                                contextRepository.save(context).subscribe();
+                                try {
+                                    telegramClient.execute(SendMessage.builder()
+                                            .chatId(String.valueOf(user.telegramId()))
+                                            .text(result.text())
+                                            .parseMode("HTML")
+                                            .build());
+                                } catch (TelegramApiException ex) {
+                                    log.warn("Не удалось отправить результат генерации: {}", ex.getMessage());
+                                }
+                            }, ex -> {
+                                context.reset();
+                                contextRepository.save(context).subscribe();
+                                log.warn("Ошибка генерации: {}", ex.getMessage());
+                            });
+                    return Mono.just(BotResponse.edit("Был выбран уровень сложности " + diff, null));
                 } catch (Exception e) {
                     List<List<BotResponse.Button>> keyboard = List.of(List.of(
                             new BotResponse.Button("1", "1"),
@@ -972,7 +988,7 @@ public class MessageDispatcher {
                     List<String> incorrectAnswers = new ArrayList<>(context.getIncorrectAnswers());
                     List<String> pendingTopics = context.getPendingTopics();
 
-                    return llmClient.generateExplanation(qText, correctAns).zipWith(
+                    llmClient.generateExplanation(qText, correctAns).zipWith(
                             difficulty > 3 ? llmClient.generateHint(qText) : Mono.just(""))
                             .flatMap(tuple -> {
                                 Question q = Question.create(
@@ -989,7 +1005,7 @@ public class MessageDispatcher {
                                                 .append("\n");
                                     if (saved.hint() != null)
                                         sb.append("Сгенерированная подсказка: ").append(saved.hint());
-                                    return BotResponse.text(sb.toString());
+                                    return sb.toString();
                                 });
                             }).onErrorResume(ex -> {
                                 Question q = Question.create(
@@ -998,10 +1014,31 @@ public class MessageDispatcher {
                                         pendingTopics);
                                 return questionService.addQuestion(q).map(saved -> {
                                     context.reset();
-                                    return BotResponse.text("Вопрос успешно добавлен под идентификатором " + saved.id()
-                                            + "\nСгенерированное пояснение: Пояснение недоступно (ошибка LLM)");
+                                    return "Вопрос успешно добавлен под идентификатором " + saved.id()
+                                            + "\nСгенерированное пояснение: Пояснение недоступно (ошибка LLM)";
                                 });
+                            })
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .subscribe(resultMsg -> {
+                                if (context.getState() == UserState.AWAITING_DIFFICULTY) {
+                                    context.reset();
+                                }
+                                contextRepository.save(context).subscribe();
+                                try {
+                                    telegramClient.execute(SendMessage.builder()
+                                            .chatId(String.valueOf(user.telegramId()))
+                                            .text(resultMsg)
+                                            .parseMode("HTML")
+                                            .build());
+                                } catch (TelegramApiException ex) {
+                                    log.warn("Не удалось отправить результат добавления вопроса: {}", ex.getMessage());
+                                }
+                            }, ex -> {
+                                context.reset();
+                                contextRepository.save(context).subscribe();
+                                log.warn("Ошибка добавления вопроса: {}", ex.getMessage());
                             });
+                    return Mono.just(BotResponse.edit("Был выбран уровень сложности " + difficulty, null));
                 } catch (Exception e) {
                     context.reset();
                     return Mono.just(BotResponse.text("Прервано добавление вопроса по причине: некорректный уровень сложности"));
@@ -1115,6 +1152,18 @@ public class MessageDispatcher {
                 .map(u -> "ID: " + u.telegramId() + " | Роль: " + u.role())
                 .collectList()
                 .map(list -> list.isEmpty() ? "Пользователей нет." : String.join("\n", list));
+    }
+
+    private List<String> splitIntoChunks(String text, int maxLen) {
+        List<String> chunks = new ArrayList<>();
+        while (text.length() > maxLen) {
+            int splitAt = text.lastIndexOf('\n', maxLen);
+            if (splitAt <= 0) splitAt = maxLen;
+            chunks.add(text.substring(0, splitAt));
+            text = text.substring(splitAt).stripLeading();
+        }
+        if (!text.isEmpty()) chunks.add(text);
+        return chunks;
     }
 
     private String formatQuestionList(List<Question> questions) {
