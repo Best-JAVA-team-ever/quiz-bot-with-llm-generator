@@ -2,7 +2,7 @@
 FROM eclipse-temurin:25-jdk AS build
 WORKDIR /home/gradle/src
 COPY . .
-RUN sed -i 's/\r//' gradlew && chmod +x gradlew && ./gradlew shadowJar --no-daemon -x test
+RUN chmod +x gradlew && ./gradlew shadowJar --no-daemon -x test
 
 # Run Stage
 FROM eclipse-temurin:25-jre
