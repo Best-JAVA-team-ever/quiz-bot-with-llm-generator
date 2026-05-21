@@ -124,7 +124,7 @@ public class MessageDispatcher {
                 .onErrorResume(e -> {
                     String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                     log.error("Критическая ошибка при обработке команды '{}' от пользователя {}: {}", text, userId, errorMsg, e);
-                    return Mono.just(BotResponse.text("Произошла критическая ошибка: " + errorMsg + ". Попробуйте ещё раз."));
+                    return Mono.just(BotResponse.text("Произошла критическая ошибка: " + escapeHtml(errorMsg) + ". Попробуйте ещё раз."));
                 });
     }
 
@@ -142,6 +142,7 @@ public class MessageDispatcher {
                     }
                     context.setState(UserState.IN_QUIZ);
                     context.setPendingTopics(topics);
+                    context.setContinuous(true);
                     return nextQuizQuestion(userId, context);
                 });
     }
@@ -160,7 +161,7 @@ public class MessageDispatcher {
                     Collections.shuffle(options);
                     context.setCurrentOptions(options);
 
-                    return Mono.just(formatQuestion(q, options));
+                    return Mono.just(formatQuestion(q, options, true));
                 })
                 .switchIfEmpty(Mono.defer(() -> {
                     context.reset();
@@ -168,7 +169,7 @@ public class MessageDispatcher {
                 }));
     }
 
-    private BotResponse formatQuestion(Question q, List<String> options) {
+    private BotResponse formatQuestion(Question q, List<String> options, boolean includeCancel) {
         List<List<BotResponse.Button>> keyboard = new ArrayList<>();
         if (options != null) {
             for (int i = 0; i < options.size(); i++) {
@@ -178,7 +179,9 @@ public class MessageDispatcher {
                 }
             }
         }
-        keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
+        if (includeCancel) {
+            keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
+        }
 
         StringBuilder sb = new StringBuilder();
         List<String> tNames = q.topicNames();
@@ -222,28 +225,31 @@ public class MessageDispatcher {
         boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
         if (textIn.equalsIgnoreCase("\\quiz_ok")) {
-            return nextQuizQuestion(userId, context)
-                    .map(next -> BotResponse.edit(next.text(), next.keyboard()));
+            context.reset();
+            return Mono.just(BotResponse.edit("Викторина завершена", null));
         }
         if (textIn.equalsIgnoreCase("\\quiz_explain")) {
             String explanation = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer() +
                     "\nПояснение: " + (q.explanation() != null ? q.explanation() : "нет");
             List<List<BotResponse.Button>> keyboard = List.of(List.of(new BotResponse.Button("Ок", "\\quiz_ok")));
-            return Mono.just(BotResponse.edit(explanation, keyboard));
+            return Mono.just(BotResponse.edit(escapeHtml(explanation), keyboard));
         }
 
         return quizService.recordAnswer(userId, q.id(), text, isCorrect).then(Mono.defer(() -> {
             if (isCorrect) {
-                return nextQuizQuestion(userId, context).map(next -> {
-                    return BotResponse.edit("Ответ корректный\n\n" + next.text(), next.keyboard());
-                });
+                String msg = "Ответ корректный!";
+                if (q.explanation() != null && !q.explanation().isEmpty()) {
+                    msg += "\n\nПояснение: " + q.explanation();
+                }
+                context.reset();
+                return Mono.just(BotResponse.edit(escapeHtml(msg), null));
             } else {
                 String msg = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer();
                 List<List<BotResponse.Button>> keyboard = List.of(
                         List.of(new BotResponse.Button("Ок", "\\quiz_ok"),
                                 new BotResponse.Button("Объяснить", "\\quiz_explain"))
                 );
-                return Mono.just(BotResponse.edit(msg, keyboard));
+                return Mono.just(BotResponse.edit(escapeHtml(msg), keyboard));
             }
         }));
     }
@@ -542,7 +548,7 @@ public class MessageDispatcher {
 
                                                 return updateStateMono.then(Mono.fromRunnable(() -> {
                                                     try {
-                                                        BotResponse response = formatQuestion(q, options);
+                                                        BotResponse response = formatQuestion(q, options, false);
                                                         SendMessage sendMessage = SendMessage.builder()
                                                             .chatId(String.valueOf(user.telegramId()))
                                                             .text("Ручной запуск расписания!\n\n" + response.text())

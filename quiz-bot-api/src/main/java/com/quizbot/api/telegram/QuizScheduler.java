@@ -271,7 +271,6 @@ public class QuizScheduler {
                 }
             }
         }
-        keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
 
         StringBuilder sb = new StringBuilder();
         List<String> tNames = q.topicNames();

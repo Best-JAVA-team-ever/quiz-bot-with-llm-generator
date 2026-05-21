@@ -27,6 +27,7 @@ import java.util.concurrent.Executors;
 public class QuizBotApplication {
 
     public static void main(String[] args) {
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Moscow"));
         // Start Spring Context
         AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(QuizBotApplication.class);
         context.registerShutdownHook();

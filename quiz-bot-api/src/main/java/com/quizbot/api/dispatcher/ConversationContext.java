@@ -24,6 +24,7 @@ public class ConversationContext {
     private Question pendingQuestion;
     private Question activeQuestion;
     private List<String> currentOptions = new ArrayList<>();
+    private boolean continuous = false;
 
     public ConversationContext() {}
 
@@ -73,6 +74,9 @@ public class ConversationContext {
     public List<String> getCurrentOptions() { return currentOptions; }
     public void setCurrentOptions(List<String> currentOptions) { this.currentOptions = currentOptions; }
 
+    public boolean isContinuous() { return continuous; }
+    public void setContinuous(boolean continuous) { this.continuous = continuous; }
+
     public void reset() {
         state = UserState.IDLE;
         pendingTopics = new ArrayList<>();
@@ -87,5 +91,6 @@ public class ConversationContext {
         pendingQuestion = null;
         activeQuestion = null;
         currentOptions = new ArrayList<>();
+        continuous = false;
     }
 }
