@@ -86,11 +86,6 @@ public class QuizServiceImpl implements QuizService {
         }
 
         @Override
-        public Mono<Boolean> processAnswer(Long userId, String answer) {
-                return Mono.just(false);
-        }
-
-        @Override
         public Mono<Void> recordAnswer(Long userId, String questionId, String value, boolean isCorrect) {
                 Answers answers = Answers.create(String.valueOf(userId), questionId, value, isCorrect);
                 return answersRepository.save(answers).then();

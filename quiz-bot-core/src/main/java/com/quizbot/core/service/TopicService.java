@@ -13,8 +13,6 @@ public interface TopicService {
 
     Mono<Topic> rename(String initiatorId, String topicId, String newName);
 
-    Mono<Topic> findOrCreate(String initiatorId, String name);
-
     Mono<Boolean> exists(String name);
 
     boolean isValid(String name);

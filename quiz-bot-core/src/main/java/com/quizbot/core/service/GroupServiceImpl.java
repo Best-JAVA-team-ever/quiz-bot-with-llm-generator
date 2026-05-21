@@ -119,11 +119,6 @@ public class GroupServiceImpl implements GroupService {
                 });
     }
 
-    @Override
-    public String generateInviteLink(String groupId) {
-        return "https://t.me/quiz_bot?start=join_" + groupId;
-    }
-
     public Mono<Void> leave(String userId, String groupId) {
         return removeMember(userId, groupId, userId);
     }

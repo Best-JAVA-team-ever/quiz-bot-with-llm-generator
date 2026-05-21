@@ -13,6 +13,5 @@ public interface GroupService {
     Flux<Group> getGroupsForUser(Long userId);
     Mono<Void> addUserToGroup(String groupId, Long userId);
     Mono<Void> removeUserFromGroup(String groupId, Long userId);
-    String generateInviteLink(String groupId);
     Flux<GroupMember> findMembers(String groupId);
 }

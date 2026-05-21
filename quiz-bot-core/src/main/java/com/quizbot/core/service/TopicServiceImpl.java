@@ -96,11 +96,6 @@ public class TopicServiceImpl implements TopicService {
 
     // --- дополнительные методы, используемые внутри модуля ---
 
-    public Mono<Topic> findOrCreate(String initiatorId, String name) {
-        return topicRepository.findByNameAndDeletedAtIsNull(name)
-                .switchIfEmpty(create(initiatorId, name));
-    }
-
     public Mono<Topic> rename(String initiatorId, String topicName, String newName) {
         if (!isValid(newName)) {
             return Mono.error(new IllegalArgumentException("Тема " + newName + " некорректна"));

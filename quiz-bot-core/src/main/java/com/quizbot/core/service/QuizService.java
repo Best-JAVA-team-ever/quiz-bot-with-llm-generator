@@ -7,6 +7,5 @@ import java.util.List;
 
 public interface QuizService {
     Mono<Question> startQuiz(Long userId, List<String> topics);
-    Mono<Boolean> processAnswer(Long userId, String answer);
     Mono<Void> recordAnswer(Long userId, String questionId, String value, boolean isCorrect);
 }

@@ -18,7 +18,5 @@ public interface UserService {
 
     Mono<Users> findByTelegramId(Long telegramId);
 
-    Mono<Users> findById(String userId);
-
     Mono<Users> resetScore(String userId);
 }

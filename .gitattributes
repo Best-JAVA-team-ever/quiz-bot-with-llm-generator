@@ -1,0 +1,10 @@
+# Normalize line endings for all text files on commit
+* text=auto
+
+# Shell scripts must always have LF (for Linux/Docker)
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Windows scripts keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

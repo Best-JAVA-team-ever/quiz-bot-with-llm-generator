@@ -1,7 +1,6 @@
 package com.quizbot.api.dispatcher;
 
 import java.util.List;
-import java.util.Map;
 
 public record BotResponse(
     String text,

@@ -8,5 +8,4 @@ dependencies {
     
     testImplementation("org.springframework:spring-test:$springVersion")
     testImplementation("org.springframework.data:spring-data-mongodb:$springDataVersion")
-    testImplementation("org.mongodb:mongodb-driver-sync:5.6.1") // Needed for testcontainers sometimes or generic test setup
 }

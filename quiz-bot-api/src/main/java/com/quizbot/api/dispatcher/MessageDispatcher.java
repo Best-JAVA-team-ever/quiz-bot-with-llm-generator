@@ -27,9 +27,7 @@ import reactor.core.scheduler.Schedulers;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
@@ -71,19 +69,22 @@ public class MessageDispatcher {
                 .defaultIfEmpty(new ConversationContext(userId))
                 .flatMap(context -> {
                     log.info("Received command from user {}: {} (currentState: {})", userId, text, context.getState());
-                    if (text.equalsIgnoreCase("\\cancel")) {
-                        context.reset();
-                        return contextRepository.save(context).thenReturn(BotResponse.text("Действие отменено"));
-                    }
-
                     return userService.getOrCreateUser(userId).flatMap(user -> {
                         if (context.getState() == UserState.IN_QUIZ) {
+                            if (text.equalsIgnoreCase("\\cancel")) {
+                                context.reset();
+                                return contextRepository.save(context).thenReturn(BotResponse.edit("Викторина завершена", null));
+                            }
                             if (text.startsWith("\\") && !text.startsWith("\\ans_") && !text.startsWith("\\quiz_")) {
                                 context.reset();
-                                return contextRepository.save(context).thenReturn(BotResponse.text("Викторина окончена"));
+                                return contextRepository.save(context).thenReturn(BotResponse.text("Викторина завершена"));
                             }
                             return processQuizAnswer(userId, context, text)
                                     .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
+                        }
+                        if (text.equalsIgnoreCase("\\cancel")) {
+                            context.reset();
+                            return contextRepository.save(context).thenReturn(BotResponse.text("Действие отменено"));
                         }
                         if (context.getState() != UserState.IDLE) {
                             return handleConversation(user, context, text)
@@ -225,8 +226,8 @@ public class MessageDispatcher {
         boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
         if (textIn.equalsIgnoreCase("\\quiz_ok")) {
-            context.reset();
-            return Mono.just(BotResponse.edit("Викторина завершена", null));
+            return nextQuizQuestion(userId, context)
+                    .map(next -> BotResponse.edit(next.text(), next.keyboard()));
         }
         if (textIn.equalsIgnoreCase("\\quiz_explain")) {
             String explanation = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer() +
@@ -237,12 +238,9 @@ public class MessageDispatcher {
 
         return quizService.recordAnswer(userId, q.id(), text, isCorrect).then(Mono.defer(() -> {
             if (isCorrect) {
-                String msg = "Ответ корректный!";
-                if (q.explanation() != null && !q.explanation().isEmpty()) {
-                    msg += "\n\nПояснение: " + q.explanation();
-                }
-                context.reset();
-                return Mono.just(BotResponse.edit(escapeHtml(msg), null));
+                String prefix = "Ответ корректный!\n\n";
+                return nextQuizQuestion(userId, context)
+                        .map(next -> BotResponse.edit(prefix + next.text(), next.keyboard()));
             } else {
                 String msg = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer();
                 List<List<BotResponse.Button>> keyboard = List.of(

@@ -66,20 +66,6 @@ public class UserServiceImpl implements UserService {
                 .map(u -> u.role() == Role.ADMIN ? Role.ADMIN : Role.USER);
     }
 
-    // --- дополнительные методы, используемые внутри модуля ---
-
-    public Mono<Users> upgradeToAdmin(String initiatorId, String targetUserId) {
-        return usersRepository.findByIdAndDeletedAtIsNull(targetUserId)
-                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
-                .flatMap(user -> {
-                    Users upgraded = user.withRole(Role.ADMIN);
-                    return usersRepository.save(upgraded);
-                })
-                .flatMap(user -> auditLogService
-                        .log(initiatorId, "UPGRADE_TO_ADMIN", "users", user.id())
-                        .thenReturn(user));
-    }
-
     public Mono<Users> resetScore(String userId) {
         return usersRepository.findByTelegramIdAndDeletedAtIsNull(Long.parseLong(userId))
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")))
@@ -87,11 +73,6 @@ public class UserServiceImpl implements UserService {
                     Users updated = user.withScoreResetAt(Instant.now());
                     return usersRepository.save(updated);
                 });
-    }
-
-    public Mono<Users> findById(String userId) {
-        return usersRepository.findByIdAndDeletedAtIsNull(userId)
-                .switchIfEmpty(Mono.error(new IllegalArgumentException("Пользователь не найден")));
     }
 
     public Mono<Users> findByTelegramId(Long telegramId) {
