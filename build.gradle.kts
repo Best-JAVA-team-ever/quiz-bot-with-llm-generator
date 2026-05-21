@@ -28,11 +28,10 @@ subprojects {
         implementation("io.projectreactor:reactor-core:3.7.0")
         implementation("org.slf4j:slf4j-api:2.0.16")
         implementation("io.micrometer:micrometer-core:1.14.2")
-        
+
         testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
         testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
         testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-        testImplementation("io.projectreactor:reactor-test:3.7.0")
     }
 
     tasks.withType<Test> {
