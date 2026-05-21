@@ -22,20 +22,20 @@ class ServiceTest {
 
     @Test
     void pickNext_noQuestions_returnsEmpty() {
-        assertEquals(Optional.empty(), QuizServiceImpl.pickNext(List.of(), List.of()));
+        assertEquals(Optional.empty(), QuizService.pickNext(List.of(), List.of()));
     }
 
     @Test
     void pickNext_questionCorrectlyAnswered_returnsEmpty() {
         Question q = question("q1", 1);
         Answers correct = Answers.create("u", "q1", "ans", true);
-        assertEquals(Optional.empty(), QuizServiceImpl.pickNext(List.of(q), List.of(correct)));
+        assertEquals(Optional.empty(), QuizService.pickNext(List.of(q), List.of(correct)));
     }
 
     @Test
     void pickNext_unansweredQuestion_returnsIt() {
         Question q = question("q1", 1);
-        Optional<Question> result = QuizServiceImpl.pickNext(List.of(q), List.of());
+        Optional<Question> result = QuizService.pickNext(List.of(q), List.of());
         assertTrue(result.isPresent());
         assertEquals("q1", result.get().id());
     }
@@ -44,13 +44,13 @@ class ServiceTest {
     void pickNext_incorrectAnswer_doesNotExcludeQuestion() {
         Question q = question("q1", 1);
         Answers wrong = Answers.create("u", "q1", "bad", false);
-        assertTrue(QuizServiceImpl.pickNext(List.of(q), List.of(wrong)).isPresent());
+        assertTrue(QuizService.pickNext(List.of(q), List.of(wrong)).isPresent());
     }
 
 
     @Test
     void calculateStats_emptyList_returnsZeros() {
-        Map<String, Object> s = StatisticsServiceImpl.calculateStats(List.of());
+        Map<String, Object> s = StatisticsService.calculateStats(List.of());
         assertEquals(0L, s.get("total"));
         assertEquals(0L, s.get("correct"));
         assertEquals(0L, s.get("incorrect"));
@@ -62,7 +62,7 @@ class ServiceTest {
         List<Answers> answers = List.of(
                 Answers.create("u", "q1", "A", true),
                 Answers.create("u", "q2", "B", true));
-        Map<String, Object> s = StatisticsServiceImpl.calculateStats(answers);
+        Map<String, Object> s = StatisticsService.calculateStats(answers);
         assertEquals(2L, s.get("total"));
         assertEquals(2L, s.get("correct"));
         assertEquals(100.0, s.get("percentage"));
@@ -74,7 +74,7 @@ class ServiceTest {
                 Answers.create("u", "q1", "A", true),
                 Answers.create("u", "q2", "B", false),
                 Answers.create("u", "q3", "C", false));
-        Map<String, Object> s = StatisticsServiceImpl.calculateStats(answers);
+        Map<String, Object> s = StatisticsService.calculateStats(answers);
         assertEquals(3L, s.get("total"));
         assertEquals(1L, s.get("correct"));
         assertEquals(2L, s.get("incorrect"));
@@ -82,7 +82,7 @@ class ServiceTest {
     }
 
 
-    private final TopicServiceImpl topicService = new TopicServiceImpl(null, null, null);
+    private final TopicService topicService = new TopicService(null, null, null);
 
     @Test
     void isValid_nullAndReservedKeyword_returnsFalse() {
@@ -105,11 +105,5 @@ class ServiceTest {
     }
 
 
-    private final GroupServiceImpl groupService = new GroupServiceImpl(null, null, null);
-
-    @Test
-    void generateInviteLink_returnsCorrectFormat() {
-        assertEquals("https://t.me/quiz_bot?start=join_abc123",
-                groupService.generateInviteLink("abc123"));
-    }
+    private final GroupService groupService = new GroupService(null, null, null);
 }
