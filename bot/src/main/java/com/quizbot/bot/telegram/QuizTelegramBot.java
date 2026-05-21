@@ -1,0 +1,125 @@
+package com.quizbot.bot.telegram;
+
+import com.quizbot.bot.dispatcher.BotResponse;
+import com.quizbot.bot.dispatcher.MessageDispatcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
+import reactor.core.scheduler.Schedulers;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Component
+public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
+
+    private static final Logger log = LoggerFactory.getLogger(QuizTelegramBot.class);
+
+    private final MessageDispatcher messageDispatcher;
+    private final TelegramClient telegramClient;
+
+    public QuizTelegramBot(TelegramClient telegramClient, MessageDispatcher messageDispatcher) {
+        this.messageDispatcher = messageDispatcher;
+        this.telegramClient = telegramClient;
+    }
+
+    @Override
+    public void consume(Update update) {
+        if (update.hasMessage() && update.getMessage().hasText()) {
+            Message message = update.getMessage();
+            long chatId = message.getChatId();
+            String text = message.getText();
+
+            messageDispatcher.handleCommand(chatId, text)
+                .subscribe(response -> sendResponse(chatId, null, response));
+
+        } else if (update.hasMessage()) {
+            long chatId = update.getMessage().getChatId();
+            sendResponse(chatId, null, BotResponse.text("Некорректный формат сообщения"));
+
+        } else if (update.hasCallbackQuery()) {
+            long chatId = update.getCallbackQuery().getMessage().getChatId();
+            int messageId = update.getCallbackQuery().getMessage().getMessageId();
+            String data = update.getCallbackQuery().getData();
+
+            messageDispatcher.handleCommand(chatId, data)
+                .subscribe(response -> sendResponse(chatId, messageId, response));
+        }
+    }
+
+    public void sendResponse(long chatId, Integer messageId, BotResponse response) {
+        log.info("Sending response to {}: {} (editMode={})", chatId, 
+            response.text() != null ? response.text().substring(0, Math.min(response.text().length(), 50)).replace("\n", " ") : "null", 
+            response.editMode());
+
+        if (response.editMode() && messageId != null) {
+            InlineKeyboardMarkup markup = (response.keyboard() != null && !response.keyboard().isEmpty())
+                    ? createKeyboardMarkup(response.keyboard())
+                    : new InlineKeyboardMarkup(new ArrayList<>());
+            EditMessageText edit = EditMessageText.builder()
+                    .chatId(String.valueOf(chatId))
+                    .messageId(messageId)
+                    .text(response.text())
+                    .replyMarkup(markup)
+                    .parseMode("HTML")
+                    .build();
+
+            Schedulers.boundedElastic().schedule(() -> {
+                try {
+                    telegramClient.execute(edit);
+                } catch (TelegramApiException e) {
+                    sendNewMessage(chatId, response);
+                }
+            });
+        } else {
+            sendNewMessage(chatId, response);
+        }
+    }
+
+    private void sendNewMessage(long chatId, BotResponse response) {
+        SendMessage sendMessage = SendMessage.builder()
+                .chatId(String.valueOf(chatId))
+                .text(response.text())
+                .replyMarkup(createKeyboardMarkup(response.keyboard()))
+                .parseMode("HTML")
+                .build();
+
+        Schedulers.boundedElastic().schedule(() -> {
+            try {
+                telegramClient.execute(sendMessage);
+            } catch (TelegramApiException e) {
+                log.error("Failed to send message to {}: {}", chatId, e.getMessage());
+            }
+        });
+    }
+
+    private InlineKeyboardMarkup createKeyboardMarkup(List<List<BotResponse.Button>> keyboard) {
+        if (keyboard == null || keyboard.isEmpty()) return null;
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+        for (List<BotResponse.Button> row : keyboard) {
+            List<InlineKeyboardButton> buttons = new ArrayList<>();
+            for (BotResponse.Button btn : row) {
+                buttons.add(InlineKeyboardButton.builder()
+                        .text(btn.text())
+                        .callbackData(btn.callbackData())
+                        .build());
+            }
+            rows.add(new InlineKeyboardRow(buttons));
+        }
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    public void sendText(long chatId, String text) {
+        sendNewMessage(chatId, BotResponse.text(text));
+    }
+}
