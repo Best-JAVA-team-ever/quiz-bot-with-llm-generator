@@ -22,6 +22,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -90,7 +91,7 @@ public class MessageDispatcher {
                                         log.error("Ошибка в диалоге пользователя {}: {}", userId, e.getMessage());
                                         context.reset();
                                         return contextRepository.save(context)
-                                                .thenReturn(BotResponse.text("Произошла ошибка. Действие прервано."));
+                                                .thenReturn(BotResponse.text("Произошла ошибка в диалоге: " + e.getMessage()));
                                     })
                                     .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
                         }
@@ -107,7 +108,7 @@ public class MessageDispatcher {
                         else if (text.startsWith("\\delete question") && isAdmin) actionMono = handleDeleteQuestion(context, text);
                         else if (text.startsWith("\\update tag") && isAdmin) actionMono = handleUpdateTag(userId, text).map(BotResponse::text);
                         else if (text.startsWith("\\delete tag") && isAdmin) actionMono = handleDeleteTag(text).map(BotResponse::text);
-                        else if (text.startsWith("\\schedule") && isAdmin) actionMono = handleSchedule(text).map(BotResponse::text);
+                        else if (text.startsWith("\\schedule") && isAdmin) actionMono = handleSchedule(text, context).map(BotResponse::text);
                         else if (text.startsWith("\\group")) actionMono = handleGroup(user, context, text);
                         else if (text.startsWith("\\get questions")) actionMono = handleGetQuestions(user, text).map(BotResponse::text);
                         else if (text.startsWith("\\quiz start")) actionMono = startQuiz(userId, context, text);
@@ -116,14 +117,13 @@ public class MessageDispatcher {
                         else actionMono = Mono.just(BotResponse.text("Неизвестная команда. Введите \\help для списка доступных команд."));
 
                         return actionMono
-                                .onErrorResume(e -> {
-                                    log.error("Ошибка при обработке команды '{}' от пользователя {}: {}", text, userId, e.getMessage());
-                                    context.reset();
-                                    return contextRepository.save(context)
-                                            .thenReturn(BotResponse.text("Произошла внутренняя ошибка. Попробуйте ещё раз."));
-                                })
                                 .flatMap(resp -> contextRepository.save(context).thenReturn(resp));
                     });
+                })
+                .onErrorResume(e -> {
+                    String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    log.error("Критическая ошибка при обработке команды '{}' от пользователя {}: {}", text, userId, errorMsg, e);
+                    return Mono.just(BotResponse.text("Произошла критическая ошибка: " + errorMsg + ". Попробуйте ещё раз."));
                 });
     }
 
@@ -149,34 +149,52 @@ public class MessageDispatcher {
         return quizService.startQuiz(userId, context.getPendingTopics())
                 .flatMap(q -> {
                     context.setActiveQuestion(q);
-                    List<String> options = new ArrayList<>(q.wrongAnswers());
-                    options.add(q.correctAnswer());
+                    List<String> options = new ArrayList<>();
+                    if (q.wrongAnswers() != null) {
+                        for (String wa : q.wrongAnswers()) {
+                            if (wa != null) options.add(wa);
+                        }
+                    }
+                    if (q.correctAnswer() != null) options.add(q.correctAnswer());
                     Collections.shuffle(options);
                     context.setCurrentOptions(options);
 
-                    List<List<BotResponse.Button>> keyboard = new ArrayList<>();
-                    for (int i = 0; i < options.size(); i++) {
-                        keyboard.add(List.of(new BotResponse.Button(options.get(i), "\\ans_" + i)));
-                    }
-                    keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
-
-                    if (q.hint() != null) {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("Темы: ").append(escapeHtml(String.join(", ", q.topicNames()))).append("\n");
-                        sb.append("Вопрос: ").append(escapeHtml(q.text())).append("\n");
-                        sb.append("Подсказка: <tg-spoiler>").append(escapeHtml(q.hint())).append("</tg-spoiler>\n\n");
-                        return Mono.just(BotResponse.buttons(sb.toString(), keyboard));
-                    } else {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
-                        sb.append("Вопрос: ").append(q.text()).append("\n\n");
-                        return Mono.just(BotResponse.buttons(sb.toString(), keyboard));
-                    }
+                    return Mono.just(formatQuestion(q, options));
                 })
                 .switchIfEmpty(Mono.defer(() -> {
                     context.reset();
                     return Mono.just(BotResponse.text("Нет неотвеченных вопросов"));
                 }));
+    }
+
+    private BotResponse formatQuestion(Question q, List<String> options) {
+        List<List<BotResponse.Button>> keyboard = new ArrayList<>();
+        if (options != null) {
+            for (int i = 0; i < options.size(); i++) {
+                String optText = options.get(i);
+                if (optText != null) {
+                    keyboard.add(List.of(new BotResponse.Button(optText, "\\ans_" + i)));
+                }
+            }
+        }
+        keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
+
+        StringBuilder sb = new StringBuilder();
+        List<String> tNames = q.topicNames();
+        String topicsStr;
+        if (tNames == null || tNames.isEmpty()) {
+            topicsStr = "—";
+        } else {
+            topicsStr = tNames.stream().filter(java.util.Objects::nonNull).collect(Collectors.joining(", "));
+        }
+        
+        sb.append("Темы: ").append(escapeHtml(topicsStr)).append("\n");
+        sb.append("Вопрос: ").append(escapeHtml(q.text() != null ? q.text() : "—")).append("\n");
+        if (q.hint() != null && !q.hint().isEmpty()) {
+            sb.append("Подсказка: <tg-spoiler>").append(escapeHtml(q.hint())).append("</tg-spoiler>\n");
+        }
+        sb.append("\n");
+        return BotResponse.buttons(sb.toString(), keyboard);
     }
 
     private static String escapeHtml(String s) {
@@ -252,13 +270,13 @@ public class MessageDispatcher {
                                 return questionService.addQuestion(finalQ).map(saved -> {
                                     context.reset();
                                     StringBuilder sb = new StringBuilder("Вопрос успешно сгенерирован\n");
-                                    sb.append("Вопрос: ").append(saved.text()).append("\n");
-                                    sb.append("Правильный ответ: ").append(saved.correctAnswer()).append("\n");
-                                    sb.append("Неправильные ответы: ").append(String.join(", ", saved.wrongAnswers()))
+                                    sb.append("Вопрос: ").append(escapeHtml(saved.text())).append("\n");
+                                    sb.append("Правильный ответ: ").append(escapeHtml(saved.correctAnswer())).append("\n");
+                                    sb.append("Неправильные ответы: ").append(escapeHtml(String.join(", ", saved.wrongAnswers())))
                                             .append("\n");
-                                    sb.append("Пояснение: ").append(saved.explanation()).append("\n");
+                                    sb.append("Пояснение: ").append(escapeHtml(saved.explanation())).append("\n");
                                     if (saved.hint() != null)
-                                        sb.append("Подсказка: ").append(saved.hint());
+                                        sb.append("Подсказка: ").append(escapeHtml(saved.hint()));
                                     return BotResponse.text(sb.toString());
                                 });
                             });
@@ -301,7 +319,7 @@ public class MessageDispatcher {
                     return Mono.just(BotResponse.text("Некорректный ID пользователя"));
                 }
                 return groupService.getGroup(groupId)
-                    .flatMap(g -> {
+                    .flatMap(g -> Mono.fromRunnable(() -> {
                         String msg = "Вас пригласили в группу «" + g.name() + "»";
                         List<List<BotResponse.Button>> keyboard = List.of(List.of(
                                 new BotResponse.Button("Вступить", "\\group_join_" + groupId),
@@ -317,12 +335,13 @@ public class MessageDispatcher {
                                                 InlineKeyboardButton.builder().text("Отклонить").callbackData("\\group_decline_" + groupId).build()
                                         )))
                                         .build())
+                                .parseMode("HTML")
                                 .build());
                         } catch (TelegramApiException e) {
                             log.warn("Не удалось уведомить пользователя {}: {}", invitedUserId, e.getMessage());
                         }
-                        return Mono.just(BotResponse.text("Приглашение пользователю " + invitedUserId + " в группу «" + g.name() + "» отправлено"));
-                    })
+                    }).subscribeOn(Schedulers.boundedElastic())
+                    .thenReturn(BotResponse.text("Приглашение пользователю " + invitedUserId + " в группу «" + g.name() + "» отправлено")))
                     .switchIfEmpty(Mono.just(BotResponse.text("Группа не найдена")));
             }
             if (params.startsWith("exclude")) {
@@ -429,18 +448,31 @@ public class MessageDispatcher {
         return Mono.just(BotResponse.text("Неизвестная подкоманда \\group"));
     }
 
-    private Mono<String> handleSchedule(String text) {
+    private Mono<String> handleSchedule(String text, ConversationContext currentContext) {
         String params = text.replace("\\schedule", "").trim();
         if (params.startsWith("set")) {
             String cron = params.replace("set", "").trim();
             try {
                 org.springframework.scheduling.support.CronExpression.parse(cron);
-                return scheduleService.setGlobalSchedule(cron, null).thenReturn("Расписание установлено: " + cron);
+                return scheduleService.setGlobalSchedule(cron, null)
+                        .thenReturn("Расписание установлено: " + cron)
+                        .onErrorResume(e -> Mono.just("Ошибка при сохранении расписания: " + e.getMessage()));
             } catch (Exception e) {
-                return Mono.just("Некорректное cron-выражение");
+                return Mono.just("Некорректное cron-выражение. Требуется 6 полей (сек мин час дм мес дн).");
             }
+        } else if (params.startsWith("topic")) {
+            String topic = params.replace("topic", "").trim();
+            if (topic.isEmpty()) return Mono.just("Использование: \\schedule topic <тема|all>");
+            String finalTopic = topic.equalsIgnoreCase("all") ? null : topic;
+            return scheduleService.getGlobalSchedule()
+                .flatMap(s -> scheduleService.setGlobalSchedule(s.cronExpression(), finalTopic)
+                    .thenReturn("Тема расписания обновлена: " + (finalTopic == null ? "все" : finalTopic)))
+                .onErrorResume(e -> Mono.just("Ошибка при обновлении темы: " + e.getMessage()))
+                .switchIfEmpty(Mono.just("Сначала установите расписание через \\schedule set"));
         } else if (params.equalsIgnoreCase("off")) {
-            return scheduleService.disableGlobalSchedule().thenReturn("Автоматическая отправка отключена");
+            return scheduleService.disableGlobalSchedule()
+                    .thenReturn("Автоматическая отправка отключена")
+                    .onErrorResume(e -> Mono.just("Ошибка при отключении: " + e.getMessage()));
         } else if (params.equalsIgnoreCase("status")) {
             return scheduleService.getGlobalSchedule()
                     .map(s -> {
@@ -450,9 +482,111 @@ public class MessageDispatcher {
                             result += "\nТема: " + s.topicName();
                         return result;
                     })
+                    .onErrorResume(e -> Mono.just("Ошибка при получении статуса: " + e.getMessage()))
                     .switchIfEmpty(Mono.just("Расписание не задано"));
+        } else if (params.equalsIgnoreCase("run now")) {
+            log.info("Starting manual schedule run by admin...");
+            return scheduleService.getGlobalSchedule()
+                    .flatMap(s -> {
+                        List<String> topics = (s.topicName() != null && !s.topicName().isEmpty()) ? List.of(s.topicName()) : List.of();
+                        log.info("Global schedule found. Topics: {}", topics);
+                        
+                        return userService.findAllActive()
+                            .onErrorResume(e -> {
+                                log.error("Error fetching active users: {}", e.getMessage());
+                                return Flux.empty();
+                            })
+                            .collectList()
+                            .flatMap(users -> {
+                                if (users.isEmpty()) {
+                                    return Mono.just("Нет активных пользователей для рассылки");
+                                }
+                                log.info("Found {} active users for manual schedule run", users.size());
+                                
+                                return Flux.fromIterable(users)
+                                    .flatMap(user -> {
+                                        if (user.telegramId() == null) return Mono.empty();
+                                        return quizService.startQuiz(user.telegramId(), topics)
+                                            .flatMap(q -> {
+                                                List<String> options = new ArrayList<>();
+                                                if (q.wrongAnswers() != null) {
+                                                    for (String wa : q.wrongAnswers()) {
+                                                        if (wa != null) options.add(wa);
+                                                    }
+                                                }
+                                                if (q.correctAnswer() != null) options.add(q.correctAnswer());
+                                                Collections.shuffle(options);
+
+                                                Mono<Void> updateStateMono;
+                                                // Если это текущий пользователь (админ), обновляем текущий объект контекста
+                                                if (user.telegramId().equals(currentContext.getUserId())) {
+                                                    currentContext.setState(UserState.IN_QUIZ);
+                                                    currentContext.setActiveQuestion(q);
+                                                    currentContext.setCurrentOptions(options);
+                                                    currentContext.setPendingTopics(topics);
+                                                    updateStateMono = Mono.empty(); // Сохранится в конце handleCommand
+                                                    log.debug("Updated current context for admin {}", user.telegramId());
+                                                } else {
+                                                    // Для других пользователей обновляем в БД
+                                                    updateStateMono = contextRepository.findById(user.telegramId())
+                                                        .defaultIfEmpty(new ConversationContext(user.telegramId()))
+                                                        .flatMap(ctx -> {
+                                                            ctx.setState(UserState.IN_QUIZ);
+                                                            ctx.setActiveQuestion(q);
+                                                            ctx.setCurrentOptions(options);
+                                                            ctx.setPendingTopics(topics);
+                                                            return contextRepository.save(ctx);
+                                                        }).then();
+                                                }
+
+                                                return updateStateMono.then(Mono.fromRunnable(() -> {
+                                                    try {
+                                                        BotResponse response = formatQuestion(q, options);
+                                                        SendMessage sendMessage = SendMessage.builder()
+                                                            .chatId(String.valueOf(user.telegramId()))
+                                                            .text("Ручной запуск расписания!\n\n" + response.text())
+                                                            .replyMarkup(createKeyboardMarkup(response.keyboard()))
+                                                            .parseMode("HTML")
+                                                            .build();
+
+                                                        telegramClient.execute(sendMessage);
+                                                        log.info("Successfully sent manual question to user {}", user.telegramId());
+                                                    } catch (Exception e) {
+                                                        log.error("Failed to send manual question to user {}: {}", user.telegramId(), e.getMessage());
+                                                    }
+                                                }).subscribeOn(Schedulers.boundedElastic()));
+                                            })
+                                            .onErrorResume(e -> {
+                                                log.error("Error processing quiz for user {}: {}", user.telegramId(), e.getMessage());
+                                                return Mono.empty();
+                                            });
+                                    })
+                                    .then(Mono.just("Ручной запуск расписания запущен для " + users.size() + " пользователей. Проверьте логи сервера для деталей."));
+                            });
+                    })
+                    .onErrorResume(e -> {
+                        log.error("Error in \\schedule run now: {}", e.getMessage(), e);
+                        return Mono.just("Ошибка при выполнении run now: " + e.getMessage());
+                    })
+                    .switchIfEmpty(Mono.just("Глобальное расписание не задано или не активно"));
         }
-        return Mono.just("Использование: \\schedule <set cron|off|status>");
+        return Mono.just("Использование: \\schedule <set cron|topic <тема>|off|status|run now>");
+    }
+
+    private org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup createKeyboardMarkup(List<List<BotResponse.Button>> keyboard) {
+        if (keyboard == null || keyboard.isEmpty()) return null;
+        List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow> rows = new ArrayList<>();
+        for (List<BotResponse.Button> row : keyboard) {
+            List<org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton> buttons = new ArrayList<>();
+            for (BotResponse.Button btn : row) {
+                buttons.add(org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
+                        .text(btn.text())
+                        .callbackData(btn.callbackData())
+                        .build());
+            }
+            rows.add(new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow(buttons));
+        }
+        return new org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup(rows);
     }
 
     private Mono<BotResponse> handleScore(Long userId, ConversationContext context, String text) {
@@ -685,15 +819,19 @@ public class MessageDispatcher {
                     String genNotice = "Генерация вопроса по теме(ам) " +
                             String.join(", ", context.getPendingTopics()) +
                             " с уровнем сложности " + diff;
-                    try {
-                        telegramClient.execute(SendMessage.builder()
-                                .chatId(String.valueOf(user.telegramId()))
-                                .text(genNotice)
-                                .build());
-                    } catch (TelegramApiException ex) {
-                        log.warn("Не удалось отправить уведомление о генерации: {}", ex.getMessage());
-                    }
-                    return performGeneration(context);
+                    
+                    return Mono.fromRunnable(() -> {
+                        try {
+                            telegramClient.execute(SendMessage.builder()
+                                    .chatId(String.valueOf(user.telegramId()))
+                                    .text(genNotice)
+                                    .parseMode("HTML")
+                                    .build());
+                        } catch (TelegramApiException ex) {
+                            log.warn("Не удалось отправить уведомление о генерации: {}", ex.getMessage());
+                        }
+                    }).subscribeOn(Schedulers.boundedElastic())
+                    .then(performGeneration(context));
                 } catch (Exception e) {
                     List<List<BotResponse.Button>> keyboard = List.of(List.of(
                             new BotResponse.Button("1", "1"),
@@ -976,7 +1114,7 @@ public class MessageDispatcher {
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
+            return "Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule topic <тема|all>\n\\schedule off\n\\schedule status\n\\schedule run now\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         } else {
             return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
         }

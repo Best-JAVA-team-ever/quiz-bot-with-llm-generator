@@ -13,12 +13,15 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Component
 public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(QuizTelegramBot.class);
 
     private final MessageDispatcher messageDispatcher;
     private final TelegramClient telegramClient;
@@ -53,41 +56,49 @@ public class QuizTelegramBot implements LongPollingSingleThreadUpdateConsumer {
     }
 
     public void sendResponse(long chatId, Integer messageId, BotResponse response) {
+        log.info("Sending response to {}: {} (editMode={})", chatId, 
+            response.text() != null ? response.text().substring(0, Math.min(response.text().length(), 50)).replace("\n", " ") : "null", 
+            response.editMode());
+
         if (response.editMode() && messageId != null) {
             InlineKeyboardMarkup markup = (response.keyboard() != null && !response.keyboard().isEmpty())
                     ? createKeyboardMarkup(response.keyboard())
                     : new InlineKeyboardMarkup(new ArrayList<>());
-            EditMessageText.EditMessageTextBuilder editBuilder = EditMessageText.builder()
+            EditMessageText edit = EditMessageText.builder()
                     .chatId(String.valueOf(chatId))
                     .messageId(messageId)
                     .text(response.text())
-                    .replyMarkup(markup);
-            if (response.text() != null && response.text().contains("<tg-spoiler>")) {
-                editBuilder.parseMode("HTML");
-            }
-            try {
-                telegramClient.execute(editBuilder.build());
-            } catch (TelegramApiException e) {
-                sendNewMessage(chatId, response);
-            }
+                    .replyMarkup(markup)
+                    .parseMode("HTML")
+                    .build();
+
+            Schedulers.boundedElastic().schedule(() -> {
+                try {
+                    telegramClient.execute(edit);
+                } catch (TelegramApiException e) {
+                    sendNewMessage(chatId, response);
+                }
+            });
         } else {
             sendNewMessage(chatId, response);
         }
     }
 
     private void sendNewMessage(long chatId, BotResponse response) {
-        SendMessage.SendMessageBuilder builder = SendMessage.builder()
+        SendMessage sendMessage = SendMessage.builder()
                 .chatId(String.valueOf(chatId))
                 .text(response.text())
-                .replyMarkup(createKeyboardMarkup(response.keyboard()));
-        if (response.text() != null && response.text().contains("<tg-spoiler>")) {
-            builder.parseMode("HTML");
-        }
-        try {
-            telegramClient.execute(builder.build());
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
+                .replyMarkup(createKeyboardMarkup(response.keyboard()))
+                .parseMode("HTML")
+                .build();
+
+        Schedulers.boundedElastic().schedule(() -> {
+            try {
+                telegramClient.execute(sendMessage);
+            } catch (TelegramApiException e) {
+                log.error("Failed to send message to {}: {}", chatId, e.getMessage());
+            }
+        });
     }
 
     private InlineKeyboardMarkup createKeyboardMarkup(List<List<BotResponse.Button>> keyboard) {

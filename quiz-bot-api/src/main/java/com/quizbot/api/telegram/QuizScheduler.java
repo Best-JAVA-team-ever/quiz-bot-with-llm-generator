@@ -1,6 +1,9 @@
 package com.quizbot.api.telegram;
 
 import com.quizbot.api.dispatcher.BotResponse;
+import com.quizbot.api.dispatcher.ConversationContext;
+import com.quizbot.api.dispatcher.ConversationContextRepository;
+import com.quizbot.api.dispatcher.UserState;
 import com.quizbot.core.domain.Question;
 import com.quizbot.core.domain.QuizSchedule;
 import com.quizbot.core.service.GroupService;
@@ -18,7 +21,9 @@ import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.util.Collections;
 import java.util.List;
@@ -40,9 +45,10 @@ public class QuizScheduler {
     private final LlmClient llmClient;
     private final QuestionService questionService;
     private final GroupService groupService;
+    private final ConversationContextRepository contextRepository;
     
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
-    private final Map<String, String> scheduledCrons = new ConcurrentHashMap<>();
+    private final Map<String, String> scheduledInfo = new ConcurrentHashMap<>();
 
     public QuizScheduler(ScheduleService scheduleService, 
                          UserService userService, 
@@ -52,7 +58,8 @@ public class QuizScheduler {
                          StatisticsService statisticsService,
                          LlmClient llmClient,
                          QuestionService questionService,
-                         GroupService groupService) {
+                         GroupService groupService,
+                         ConversationContextRepository contextRepository) {
         this.scheduleService = scheduleService;
         this.userService = userService;
         this.quizService = quizService;
@@ -62,6 +69,7 @@ public class QuizScheduler {
         this.llmClient = llmClient;
         this.questionService = questionService;
         this.groupService = groupService;
+        this.contextRepository = contextRepository;
     }
 
     @PostConstruct
@@ -70,85 +78,125 @@ public class QuizScheduler {
         refreshSchedules();
     }
 
+    @Scheduled(fixedRate = 600000) // Раз в 10 минут
+    public void heartbeat() {
+        String schedulerStatus = "unknown";
+        if (taskScheduler instanceof org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler tpts) {
+            schedulerStatus = String.format("poolSize: %d, activeCount: %d", 
+                tpts.getPoolSize(), tpts.getActiveCount());
+        }
+        log.info("QuizScheduler heartbeat: active tasks: {}, scheduler: {}", 
+            scheduledTasks.size(), schedulerStatus);
+    }
+
     @Scheduled(cron = "0 0 8 L * ?", zone = "Europe/Moscow")
     public void runMonthlyDifficultyUpdate() {
         log.info("Starting monthly adaptive difficulty update...");
-        statisticsService.getQuestionsWithStats().collectList().subscribe(stats -> {
-            llmClient.suggestDifficultyUpdates(stats).subscribe(updates -> {
-                for (var update : updates) {
-                    questionService.getQuestionById(update.questionId()).subscribe(q -> {
-                        if (q != null && q.difficulty() != update.newDifficulty()) {
-                            int oldDiff = q.difficulty();
-                            int newDiff = update.newDifficulty();
-                            Question withNewDiff = q.withDifficulty(newDiff);
-                            Mono<Question> withHintMono;
-                            if (oldDiff <= 3 && newDiff >= 4) {
-                                withHintMono = llmClient.generateHint(q.text())
-                                        .map(hint -> withNewDiff.withHint(hint.isEmpty() ? null : hint))
-                                        .onErrorReturn(withNewDiff);
-                            } else if (oldDiff >= 4 && newDiff <= 3) {
-                                withHintMono = Mono.just(withNewDiff.withHint(null));
-                            } else {
-                                withHintMono = Mono.just(withNewDiff);
-                            }
-                            withHintMono.flatMap(finalQ -> questionService.updateQuestion(finalQ))
-                                    .subscribe(saved -> log.info("Updated difficulty for question {} to {}", saved.id(), newDiff));
+        statisticsService.getQuestionsWithStats().collectList().subscribe(
+            stats -> {
+                llmClient.suggestDifficultyUpdates(stats).subscribe(
+                    updates -> {
+                        for (var update : updates) {
+                            questionService.getQuestionById(update.questionId()).subscribe(q -> {
+                                if (q != null && q.difficulty() != update.newDifficulty()) {
+                                    int oldDiff = q.difficulty();
+                                    int newDiff = update.newDifficulty();
+                                    Question withNewDiff = q.withDifficulty(newDiff);
+                                    Mono<Question> withHintMono;
+                                    if (oldDiff <= 3 && newDiff >= 4) {
+                                        withHintMono = llmClient.generateHint(q.text())
+                                                .map(hint -> withNewDiff.withHint(hint.isEmpty() ? null : hint))
+                                                .onErrorReturn(withNewDiff);
+                                    } else if (oldDiff >= 4 && newDiff <= 3) {
+                                        withHintMono = Mono.just(withNewDiff.withHint(null));
+                                    } else {
+                                        withHintMono = Mono.just(withNewDiff);
+                                    }
+                                    withHintMono.flatMap(finalQ -> questionService.updateQuestion(finalQ))
+                                            .subscribe(saved -> log.info("Updated difficulty for question {} to {}", saved.id(), newDiff));
+                                }
+                            });
                         }
-                    });
-                }
-            });
-        });
+                    },
+                    e -> log.error("Error getting difficulty updates: {}", e.getMessage())
+                );
+            },
+            e -> log.error("Error getting question stats: {}", e.getMessage())
+        );
     }
 
-    @Scheduled(fixedRate = 10000)
+    @Scheduled(fixedRate = 60000) // Раз в минуту вполне достаточно
     public void refreshSchedules() {
-        scheduleService.getGlobalSchedule().subscribe(this::syncSchedule);
+        log.debug("Refreshing schedules...");
         
-        // Добавляем синхронизацию групповых расписаний
-        groupService.getAllGroups()
-            .flatMap(group -> scheduleService.getGroupSchedule(group.id()))
-            .subscribe(this::syncSchedule);
+        scheduleService.getGlobalSchedule()
+            .map(List::of)
+            .defaultIfEmpty(List.of())
+            .zipWith(groupService.getAllGroups()
+                .flatMap(group -> scheduleService.getGroupSchedule(group.id()))
+                .collectList()
+                .defaultIfEmpty(List.of()))
+            .subscribe(tuple -> {
+                List<QuizSchedule> allDbSchedules = new java.util.ArrayList<>();
+                allDbSchedules.addAll(tuple.getT1());
+                allDbSchedules.addAll(tuple.getT2());
+                
+                java.util.Set<String> dbIds = allDbSchedules.stream()
+                    .filter(QuizSchedule::isActive)
+                    .map(QuizSchedule::id)
+                    .collect(java.util.stream.Collectors.toSet());
+                
+                // Отменяем те, что есть в памяти, но нет в БД или стали неактивны
+                for (String taskId : scheduledTasks.keySet()) {
+                    if (!dbIds.contains(taskId)) {
+                        ScheduledFuture<?> future = scheduledTasks.remove(taskId);
+                        scheduledInfo.remove(taskId);
+                        if (future != null) {
+                            future.cancel(false);
+                            log.info("Cancelled schedule {} (removed from DB or deactivated)", taskId);
+                        }
+                    }
+                }
+                
+                // Синхронизируем активные
+                for (QuizSchedule s : allDbSchedules) {
+                    syncSchedule(s);
+                }
+            }, e -> log.error("Error refreshing schedules: {}", e.getMessage()));
     }
 
     private void syncSchedule(QuizSchedule schedule) {
-        if (schedule == null) return;
+        if (schedule == null || !schedule.isActive()) return;
         String taskId = schedule.id();
 
-        if (!schedule.isActive()) {
-            ScheduledFuture<?> future = scheduledTasks.remove(taskId);
-            scheduledCrons.remove(taskId);
-            if (future != null) {
-                future.cancel(false);
-                log.info("Cancelled schedule {}", taskId);
-            }
-            return;
-        }
-
-        String existingCron = scheduledCrons.get(taskId);
-        if (existingCron != null && existingCron.equals(schedule.cronExpression())) {
+        String info = schedule.cronExpression() + "|" + (schedule.topicName() != null ? schedule.topicName() : "");
+        String existingInfo = scheduledInfo.get(taskId);
+        
+        if (existingInfo != null && existingInfo.equals(info)) {
             return;
         }
 
         ScheduledFuture<?> old = scheduledTasks.remove(taskId);
-        scheduledCrons.remove(taskId);
+        scheduledInfo.remove(taskId);
         if (old != null) {
             old.cancel(false);
-            log.info("Rescheduling {} (cron changed: {} → {})", taskId, existingCron, schedule.cronExpression());
+            log.info("Rescheduling {} (changed: {} → {})", taskId, existingInfo, info);
         }
 
-        scheduleTask(schedule);
+        scheduleTask(schedule, info);
     }
 
-    private void scheduleTask(QuizSchedule schedule) {
+    private void scheduleTask(QuizSchedule schedule, String info) {
         try {
             ScheduledFuture<?> future = taskScheduler.schedule(
                     () -> runScheduledQuiz(schedule),
                     new CronTrigger(schedule.cronExpression(), java.util.TimeZone.getTimeZone("Europe/Moscow")));
             scheduledTasks.put(schedule.id(), future);
-            scheduledCrons.put(schedule.id(), schedule.cronExpression());
-            log.info("Scheduled task {} with cron {}", schedule.id(), schedule.cronExpression());
+            scheduledInfo.put(schedule.id(), info);
+            log.info("Scheduled task {} with cron {} and topic {}", 
+                schedule.id(), schedule.cronExpression(), schedule.topicName());
         } catch (Exception e) {
-            log.error("Failed to schedule task with cron: {}", schedule.cronExpression(), e);
+            log.error("Failed to schedule task {}: {}", schedule.id(), e.getMessage());
         }
     }
 
@@ -158,48 +206,84 @@ public class QuizScheduler {
 
         if (schedule.id().startsWith("group:")) {
             String groupId = schedule.id().substring(6);
-            groupService.findMembers(groupId).subscribe(
-                    member -> sendScheduledQuestion(Long.parseLong(member.userId()), topics, true),
-                    e -> log.error("Error fetching members for group {}: {}", groupId, e.getMessage()));
+            log.info("Fetching members for group {}", groupId);
+            groupService.findMembers(groupId)
+                .flatMap(member -> sendScheduledQuestion(Long.parseLong(member.userId()), topics, true))
+                .subscribe(
+                    v -> {},
+                    e -> log.error("Error executing group schedule {}: {}", groupId, e.getMessage()),
+                    () -> log.info("Finished group schedule {}", groupId));
         } else {
-            userService.findAllActive().subscribe(
-                    user -> sendScheduledQuestion(user.telegramId(), topics, false),
-                    e -> log.error("Error fetching active users: {}", e.getMessage()));
+            log.info("Fetching all active users for global schedule");
+            userService.findAllActive()
+                .flatMap(user -> sendScheduledQuestion(user.telegramId(), topics, false))
+                .subscribe(
+                    v -> {},
+                    e -> log.error("Error executing global schedule: {}", e.getMessage()),
+                    () -> log.info("Finished global schedule"));
         }
     }
 
-    private void sendScheduledQuestion(long telegramId, List<String> topics, boolean isGroup) {
-        quizService.startQuiz(telegramId, topics)
-            .doOnNext(q -> {
-                BotResponse response = formatQuestion(q);
-                String header = (isGroup ? "Групповой вопрос!\n\n" : "Автоматический вопрос дня!\n\n");
-                BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
-                telegramBot.sendResponse(telegramId, null, headeredResponse);
-            })
+    private Mono<Void> sendScheduledQuestion(long telegramId, List<String> topics, boolean isGroup) {
+        log.debug("Preparing scheduled question for user {}, topics: {}, isGroup: {}", telegramId, topics, isGroup);
+        return quizService.startQuiz(telegramId, topics)
+            .flatMap(q -> contextRepository.findById(telegramId)
+                .defaultIfEmpty(new ConversationContext(telegramId))
+                .flatMap(ctx -> {
+                    log.info("Picked question {} for user {}", q.id(), telegramId);
+                    
+                    List<String> options = new java.util.ArrayList<>();
+                    if (q.wrongAnswers() != null) options.addAll(q.wrongAnswers());
+                    options.add(q.correctAnswer());
+                    Collections.shuffle(options);
+                    
+                    ctx.setState(UserState.IN_QUIZ);
+                    ctx.setActiveQuestion(q);
+                    ctx.setCurrentOptions(options);
+                    ctx.setPendingTopics(topics);
+                    
+                    return contextRepository.save(ctx).then(Mono.fromRunnable(() -> {
+                        BotResponse response = formatQuestion(q, options);
+                        String header = (isGroup ? "Групповой вопрос!\n\n" : "Автоматический вопрос дня!\n\n");
+                        BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
+                        telegramBot.sendResponse(telegramId, null, headeredResponse);
+                    }).subscribeOn(Schedulers.boundedElastic()));
+                }))
             .switchIfEmpty(Mono.defer(() -> {
                 log.info("No questions available for scheduled quiz for user {}", telegramId);
                 String header = (isGroup ? "Групповой вопрос: " : "Автоматический вопрос дня: ");
-                telegramBot.sendResponse(telegramId, null, BotResponse.text(header + "Нет неотвеченных вопросов по выбранным темам."));
-                return Mono.empty();
+                return Mono.fromRunnable(() -> telegramBot.sendResponse(telegramId, null, BotResponse.text(header + "Нет неотвеченных вопросов по выбранным темам.")))
+                    .subscribeOn(Schedulers.boundedElastic());
             }))
-            .subscribe(
-                q -> {},
-                e -> log.error("Error picking question for user {}: {}", telegramId, e.getMessage())
-            );
+            .onErrorResume(e -> {
+                log.error("Error in sendScheduledQuestion for user {}: {}", telegramId, e.getMessage());
+                return Mono.empty();
+            }).then();
     }
 
-    private BotResponse formatQuestion(Question q) {
-        List<String> options = new java.util.ArrayList<>(q.wrongAnswers());
-        options.add(q.correctAnswer());
-        Collections.shuffle(options);
-        
-        StringBuilder sb = new StringBuilder();
-        sb.append("Темы: ").append(String.join(", ", q.topicNames())).append("\n");
-        sb.append("Вопрос: ").append(q.text()).append("\n\n");
+    private BotResponse formatQuestion(Question q, List<String> options) {
         List<List<BotResponse.Button>> keyboard = new java.util.ArrayList<>();
-        for (String opt : options) {
-            keyboard.add(List.of(new BotResponse.Button(opt, "\\ans_" + opt)));
+        if (options != null) {
+            for (int i = 0; i < options.size(); i++) {
+                keyboard.add(List.of(new BotResponse.Button(options.get(i), "\\ans_" + i)));
+            }
         }
+        keyboard.add(List.of(new BotResponse.Button("Закончить викторину", "\\cancel")));
+
+        StringBuilder sb = new StringBuilder();
+        String topicsStr = (q.topicNames() != null ? String.join(", ", q.topicNames()) : "—");
+        sb.append("Темы: ").append(escapeHtml(topicsStr)).append("\n");
+        sb.append("Вопрос: ").append(escapeHtml(q.text() != null ? q.text() : "—")).append("\n");
+        if (q.hint() != null && !q.hint().isEmpty()) {
+            sb.append("Подсказка: <tg-spoiler>").append(escapeHtml(q.hint())).append("</tg-spoiler>\n");
+        }
+        sb.append("\n");
+
         return BotResponse.buttons(sb.toString(), keyboard);
+    }
+
+    private static String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 }
