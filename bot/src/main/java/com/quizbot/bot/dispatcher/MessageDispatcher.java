@@ -11,6 +11,7 @@ import com.quizbot.core.service.ScheduleService;
 import com.quizbot.core.service.StatisticsService;
 import com.quizbot.core.service.TopicService;
 import com.quizbot.core.service.UserService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -27,7 +28,9 @@ import reactor.core.scheduler.Schedulers;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Component
@@ -44,8 +47,9 @@ public class MessageDispatcher {
     private final GroupService groupService;
     private final TelegramClient telegramClient;
     private final ConversationContextRepository contextRepository;
+    private final MeterRegistry meterRegistry;
 
-    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient, ConversationContextRepository contextRepository) {
+    public MessageDispatcher(UserService userService, QuestionService questionService, TopicService topicService, QuizService quizService, StatisticsService statisticsService, LlmClient llmClient, ScheduleService scheduleService, GroupService groupService, TelegramClient telegramClient, ConversationContextRepository contextRepository, MeterRegistry meterRegistry) {
         this.userService = userService;
         this.questionService = questionService;
         this.topicService = topicService;
@@ -56,6 +60,7 @@ public class MessageDispatcher {
         this.groupService = groupService;
         this.telegramClient = telegramClient;
         this.contextRepository = contextRepository;
+        this.meterRegistry = meterRegistry;
     }
 
     public Mono<BotResponse> handleCommand(Long userId, String textIn) {
@@ -111,6 +116,7 @@ public class MessageDispatcher {
                         else if (text.startsWith("\\delete tag") && isAdmin) actionMono = handleDeleteTag(text).map(BotResponse::text);
                         else if (text.startsWith("\\schedule") && isAdmin) actionMono = handleSchedule(text, context).map(BotResponse::text);
                         else if (text.startsWith("\\get users") && isAdmin) actionMono = handleGetUsers().map(BotResponse::text);
+                        else if (text.equalsIgnoreCase("\\get llm stats") && isAdmin) actionMono = Mono.just(BotResponse.text(handleGetLlmStats()));
                         else if (text.startsWith("\\group")) actionMono = handleGroup(user, context, text);
                         else if (text.startsWith("\\get questions")) actionMono = handleGetQuestions(user, text)
                                 .flatMap(fullText -> Mono.fromCallable(() -> {
@@ -1154,6 +1160,56 @@ public class MessageDispatcher {
                 .map(list -> list.isEmpty() ? "Пользователей нет." : String.join("\n", list));
     }
 
+    private static final java.util.Map<String, String> LLM_OPERATION_NAMES = java.util.Map.of(
+            "generate_question",    "Генерация вопроса",
+            "generate_explanation", "Генерация пояснения",
+            "generate_hint",        "Генерация подсказки",
+            "suggest_difficulty",   "Обновление сложности"
+    );
+
+    private String operationLabel(String key) {
+        return LLM_OPERATION_NAMES.getOrDefault(key, key);
+    }
+
+    private String handleGetLlmStats() {
+        StringBuilder sb = new StringBuilder("Статистика LLM API:\n\n");
+
+        var calls = meterRegistry.find("llm.api.calls").counters().stream()
+                .sorted(Comparator.comparing(c -> c.getId().getTag("operation")))
+                .toList();
+        if (calls.isEmpty()) {
+            sb.append("Вызовов ещё не было.\n");
+        } else {
+            sb.append("Успешные вызовы:\n");
+            calls.forEach(c -> sb.append(String.format("  %s: %.0f\n",
+                    operationLabel(c.getId().getTag("operation")), c.count())));
+        }
+
+        var errors = meterRegistry.find("llm.api.errors").counters().stream()
+                .sorted(Comparator.comparing(c -> c.getId().getTag("operation")))
+                .toList();
+        if (!errors.isEmpty()) {
+            sb.append("\nОшибки:\n");
+            errors.forEach(c -> sb.append(String.format("  %s: %.0f\n",
+                    operationLabel(c.getId().getTag("operation")), c.count())));
+        }
+
+        var timers = meterRegistry.find("llm.api.duration").timers().stream()
+                .filter(t -> "success".equals(t.getId().getTag("status")) && t.count() > 0)
+                .sorted(Comparator.comparing(t -> t.getId().getTag("operation")))
+                .toList();
+        if (!timers.isEmpty()) {
+            sb.append("\nДлительность (успешные):\n");
+            timers.forEach(t -> sb.append(String.format("  %s: среднее %.0f мс, макс. %.0f мс (%d вызовов)\n",
+                    operationLabel(t.getId().getTag("operation")),
+                    t.mean(TimeUnit.MILLISECONDS),
+                    t.max(TimeUnit.MILLISECONDS),
+                    t.count())));
+        }
+
+        return sb.toString().trim();
+    }
+
     private List<String> splitIntoChunks(String text, int maxLen) {
         List<String> chunks = new ArrayList<>();
         while (text.length() > maxLen) {
@@ -1186,7 +1242,7 @@ public class MessageDispatcher {
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return escapeHtml("Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\get users\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help");
+            return escapeHtml("Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\get users\n\\get llm stats\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help");
         } else {
             return escapeHtml("Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help");
         }
