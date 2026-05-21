@@ -32,16 +32,10 @@ subprojects {
         testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.3")
         testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.3")
         testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-        testImplementation("org.mockito:mockito-core:5.14.2")
-        testImplementation("org.mockito:mockito-junit-jupiter:5.14.2")
         testImplementation("io.projectreactor:reactor-test:3.7.0")
-        testImplementation("org.testcontainers:testcontainers:1.20.4")
-        testImplementation("org.testcontainers:junit-jupiter:1.20.4")
-        testImplementation("org.testcontainers:mongodb:1.20.4")
     }
 
     tasks.withType<Test> {
         useJUnitPlatform()
-        jvmArgs("-Dnet.bytebuddy.experimental=true")
     }
 }
