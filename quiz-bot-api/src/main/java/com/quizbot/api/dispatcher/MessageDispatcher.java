@@ -1122,9 +1122,9 @@ public class MessageDispatcher {
 
     private String handleHelp(Users user) {
         if (user.role() == Role.ADMIN) {
-            return "Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\get users\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
+            return escapeHtml("Команды администратора:\n\\add tag <название>\n\\delete tag <название>\n\\add question <тема1>...\n\\add question gen <тема1>...\n\\update question <ID>\n\\update tag <старое_название> <новое_название>\n\\delete question <ID|Тема|all>\n\\get questions [all|<тема>]\n\\get users\n\\upgrade <ID>\n\\update difficulty\n\\cancel\n\\group create <название>\n\\group invite <ID_группы> <ID_пользователя>\n\\group exclude <ID_группы> <ID_пользователя>\n\\group delete <ID_группы>\n\\group list\n\\group score\n\\group schedule set <ID_группы> <cron>\n\\group schedule off <ID_группы>\n\\schedule set <cron>\n\\schedule off\n\\schedule status\n\nПользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help");
         } else {
-            return "Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help";
+            return escapeHtml("Пользовательские команды:\n\\quiz start [тема]\n\\score [тема|reset]\n\\get questions\n\\group leave\n\\group score\n\\cancel (закончить викторину)\n\\help");
         }
     }
 }
