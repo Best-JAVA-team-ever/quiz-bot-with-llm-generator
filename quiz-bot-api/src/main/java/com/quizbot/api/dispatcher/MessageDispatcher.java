@@ -225,6 +225,10 @@ public class MessageDispatcher {
         boolean isCorrect = q.correctAnswer().equalsIgnoreCase(text);
 
         if (textIn.equalsIgnoreCase("\\quiz_ok")) {
+            if (context.isContinuous()) {
+                return nextQuizQuestion(userId, context)
+                        .map(next -> BotResponse.edit(next.text(), next.keyboard()));
+            }
             context.reset();
             return Mono.just(BotResponse.edit("Викторина завершена", null));
         }
@@ -237,13 +241,23 @@ public class MessageDispatcher {
 
         return quizService.recordAnswer(userId, q.id(), text, isCorrect).then(Mono.defer(() -> {
             if (isCorrect) {
-                String msg = "Ответ корректный!";
+                if (context.isContinuous()) {
+                    return nextQuizQuestion(userId, context).map(next -> {
+                        String msg = "✅ Ответ корректный!";
+                        if (q.explanation() != null && !q.explanation().isEmpty()) {
+                            msg += "\n\nПояснение: " + q.explanation();
+                        }
+                        return BotResponse.edit(escapeHtml(msg) + "\n\n" + next.text(), next.keyboard());
+                    });
+                }
+                String msg = "✅ Ответ корректный!";
                 if (q.explanation() != null && !q.explanation().isEmpty()) {
                     msg += "\n\nПояснение: " + q.explanation();
                 }
                 context.reset();
                 return Mono.just(BotResponse.edit(escapeHtml(msg), null));
             } else {
+
                 String msg = "Ответ некорректный\nКорректный ответ: " + q.correctAnswer();
                 List<List<BotResponse.Button>> keyboard = List.of(
                         List.of(new BotResponse.Button("Ок", "\\quiz_ok"),
@@ -531,6 +545,7 @@ public class MessageDispatcher {
                                                     currentContext.setActiveQuestion(q);
                                                     currentContext.setCurrentOptions(options);
                                                     currentContext.setPendingTopics(topics);
+                                                    currentContext.setContinuous(false);
                                                     updateStateMono = Mono.empty(); // Сохранится в конце handleCommand
                                                     log.debug("Updated current context for admin {}", user.telegramId());
                                                 } else {
@@ -542,6 +557,7 @@ public class MessageDispatcher {
                                                             ctx.setActiveQuestion(q);
                                                             ctx.setCurrentOptions(options);
                                                             ctx.setPendingTopics(topics);
+                                                            ctx.setContinuous(false);
                                                             return contextRepository.save(ctx);
                                                         }).then();
                                                 }

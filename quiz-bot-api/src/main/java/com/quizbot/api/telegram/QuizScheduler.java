@@ -241,6 +241,7 @@ public class QuizScheduler {
                     ctx.setActiveQuestion(q);
                     ctx.setCurrentOptions(options);
                     ctx.setPendingTopics(topics);
+                    ctx.setContinuous(false);
                     
                     return contextRepository.save(ctx).then(Mono.fromRunnable(() -> {
                         BotResponse response = formatQuestion(q, options);
