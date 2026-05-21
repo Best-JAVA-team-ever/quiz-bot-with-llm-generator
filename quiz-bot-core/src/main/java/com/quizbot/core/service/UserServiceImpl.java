@@ -100,6 +100,6 @@ public class UserServiceImpl implements UserService {
     }
 
     public Flux<Users> findAllActive() {
-        return usersRepository.findAllByIsActiveTrueAndDeletedAtIsNull();
+        return usersRepository.findAllByDeletedAtIsNull();
     }
 }

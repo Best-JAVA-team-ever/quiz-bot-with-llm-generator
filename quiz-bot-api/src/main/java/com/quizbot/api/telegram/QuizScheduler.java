@@ -70,7 +70,7 @@ public class QuizScheduler {
         refreshSchedules();
     }
 
-    @Scheduled(cron = "0 0 8 L * ?")
+    @Scheduled(cron = "0 0 8 L * ?", zone = "Europe/Moscow")
     public void runMonthlyDifficultyUpdate() {
         log.info("Starting monthly adaptive difficulty update...");
         statisticsService.getQuestionsWithStats().collectList().subscribe(stats -> {
@@ -100,16 +100,13 @@ public class QuizScheduler {
         });
     }
 
-    @Scheduled(fixedRate = 60000)
+    @Scheduled(fixedRate = 10000)
     public void refreshSchedules() {
         scheduleService.getGlobalSchedule().subscribe(this::syncSchedule);
         
         // Добавляем синхронизацию групповых расписаний
-        userService.getAllUsers()
-            .flatMap(u -> groupService.getGroupsForUser(u.telegramId()))
-            .map(group -> group.id())
-            .distinct()
-            .flatMap(groupId -> scheduleService.getGroupSchedule(groupId))
+        groupService.getAllGroups()
+            .flatMap(group -> scheduleService.getGroupSchedule(group.id()))
             .subscribe(this::syncSchedule);
     }
 
@@ -146,7 +143,7 @@ public class QuizScheduler {
         try {
             ScheduledFuture<?> future = taskScheduler.schedule(
                     () -> runScheduledQuiz(schedule),
-                    new CronTrigger(schedule.cronExpression()));
+                    new CronTrigger(schedule.cronExpression(), java.util.TimeZone.getTimeZone("Europe/Moscow")));
             scheduledTasks.put(schedule.id(), future);
             scheduledCrons.put(schedule.id(), schedule.cronExpression());
             log.info("Scheduled task {} with cron {}", schedule.id(), schedule.cronExpression());
@@ -162,24 +159,33 @@ public class QuizScheduler {
         if (schedule.id().startsWith("group:")) {
             String groupId = schedule.id().substring(6);
             groupService.findMembers(groupId).subscribe(
-                    member -> sendScheduledQuestion(Long.parseLong(member.userId()), topics),
+                    member -> sendScheduledQuestion(Long.parseLong(member.userId()), topics, true),
                     e -> log.error("Error fetching members for group {}: {}", groupId, e.getMessage()));
         } else {
             userService.findAllActive().subscribe(
-                    user -> sendScheduledQuestion(user.telegramId(), topics),
+                    user -> sendScheduledQuestion(user.telegramId(), topics, false),
                     e -> log.error("Error fetching active users: {}", e.getMessage()));
         }
     }
 
-    private void sendScheduledQuestion(long telegramId, List<String> topics) {
-        quizService.startQuiz(telegramId, topics).subscribe(
-                q -> {
-                    BotResponse response = formatQuestion(q);
-                    String header = "Автоматический вопрос дня!\n\n";
-                    BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
-                    telegramBot.sendResponse(telegramId, null, headeredResponse);
-                },
-                e -> log.error("Error picking question for user {}: {}", telegramId, e.getMessage()));
+    private void sendScheduledQuestion(long telegramId, List<String> topics, boolean isGroup) {
+        quizService.startQuiz(telegramId, topics)
+            .doOnNext(q -> {
+                BotResponse response = formatQuestion(q);
+                String header = (isGroup ? "Групповой вопрос!\n\n" : "Автоматический вопрос дня!\n\n");
+                BotResponse headeredResponse = new BotResponse(header + response.text(), response.keyboard(), false);
+                telegramBot.sendResponse(telegramId, null, headeredResponse);
+            })
+            .switchIfEmpty(Mono.defer(() -> {
+                log.info("No questions available for scheduled quiz for user {}", telegramId);
+                String header = (isGroup ? "Групповой вопрос: " : "Автоматический вопрос дня: ");
+                telegramBot.sendResponse(telegramId, null, BotResponse.text(header + "Нет неотвеченных вопросов по выбранным темам."));
+                return Mono.empty();
+            }))
+            .subscribe(
+                q -> {},
+                e -> log.error("Error picking question for user {}: {}", telegramId, e.getMessage())
+            );
     }
 
     private BotResponse formatQuestion(Question q) {
