@@ -118,7 +118,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                     .count()));
     }
 
-    private static Map<String, Object> calculateStats(List<Answers> answers) {
+    static Map<String, Object> calculateStats(List<Answers> answers) {
         long total = answers.size();
         long correct = answers.stream().filter(Answers::isCorrect).count();
         long incorrect = total - correct;

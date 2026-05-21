@@ -51,40 +51,38 @@ public class QuizServiceImpl implements QuizService {
                                                                         return Mono.empty();
 
                                                                 return answersRepository
-                                                                                .findAllByUserIdAndAnsweredAtAfter(
-                                                                                                userIdStr, since)
+                                                                                .findAllByUserIdAndAnsweredAtAfter(userIdStr, since)
                                                                                 .collectList()
-                                                                                .flatMap(userAnswers -> {
-                                                                                        List<String> answeredCorrectlyIds = userAnswers.stream()
-                                                                                                        .filter(Answers::isCorrect)
-                                                                                                        .map(Answers::questionId)
-                                                                                                        .collect(Collectors.toList());
-
-                                                                                        java.util.Map<String, Instant> lastAnsweredMap = userAnswers.stream()
-                                                                                                        .collect(Collectors.toMap(Answers::questionId, Answers::answeredAt, (a, b) -> a.isAfter(b) ? a : b));
-
-                                                                                        List<Question> available = allQuestions.stream()
-                                                                                                        .filter(q -> !answeredCorrectlyIds.contains(q.id()))
-                                                                                                        .sorted(Comparator.comparingInt(Question::difficulty)
-                                                                                                                .thenComparing(q -> lastAnsweredMap.getOrDefault(q.id(), Instant.EPOCH)))
-                                                                                                        .collect(Collectors.toList());
-
-                                                                                        if (available.isEmpty())
-                                                                                                return Mono.empty();
-
-                                                                                        int shuffleRange = Math.min(3,
-                                                                                                        available.size());
-                                                                                        List<Question> candidates = new ArrayList<>(
-                                                                                                        available.subList(
-                                                                                                                        0,
-                                                                                                                        shuffleRange));
-                                                                                        Collections.shuffle(candidates);
-
-                                                                                        return Mono.just(candidates
-                                                                                                        .get(0));
-                                                                                });
+                                                                                .flatMap(userAnswers ->
+                                                                                        pickNext(allQuestions, userAnswers)
+                                                                                                .map(Mono::just)
+                                                                                                .orElse(Mono.empty()));
                                                         });
                                 });
+        }
+
+        // package-private for unit testing
+        static java.util.Optional<Question> pickNext(List<Question> allQuestions, List<Answers> userAnswers) {
+                List<String> answeredCorrectlyIds = userAnswers.stream()
+                                .filter(Answers::isCorrect)
+                                .map(Answers::questionId)
+                                .collect(Collectors.toList());
+
+                java.util.Map<String, Instant> lastAnsweredMap = userAnswers.stream()
+                                .collect(Collectors.toMap(Answers::questionId, Answers::answeredAt,
+                                                (a, b) -> a.isAfter(b) ? a : b));
+
+                List<Question> available = allQuestions.stream()
+                                .filter(q -> !answeredCorrectlyIds.contains(q.id()))
+                                .sorted(Comparator.comparingInt(Question::difficulty)
+                                                .thenComparing(q -> lastAnsweredMap.getOrDefault(q.id(), Instant.EPOCH)))
+                                .collect(Collectors.toList());
+
+                if (available.isEmpty()) return java.util.Optional.empty();
+
+                List<Question> candidates = new ArrayList<>(available.subList(0, Math.min(3, available.size())));
+                Collections.shuffle(candidates);
+                return java.util.Optional.of(candidates.get(0));
         }
 
         @Override
