@@ -1,0 +1,28 @@
+= Quiz Bot REST API
+:toc: left
+:sectanchors:
+:snippets: {snippets}
+
+== GET /healthcheck
+
+Публичный эндпоинт для проверки состояния сервиса.
+
+include::{snippets}/healthcheck/http-request.adoc[]
+include::{snippets}/healthcheck/http-response.adoc[]
+include::{snippets}/healthcheck/response-fields.adoc[]
+
+== GET /users
+
+Возвращает список всех зарегистрированных пользователей. Требует заголовок `X-API-KEY`.
+
+=== Успешный запрос
+
+include::{snippets}/get-users/http-request.adoc[]
+include::{snippets}/get-users/request-headers.adoc[]
+include::{snippets}/get-users/http-response.adoc[]
+include::{snippets}/get-users/response-fields.adoc[]
+
+=== Отказ в доступе (без API-ключа)
+
+include::{snippets}/get-users-forbidden/http-request.adoc[]
+include::{snippets}/get-users-forbidden/http-response.adoc[]
