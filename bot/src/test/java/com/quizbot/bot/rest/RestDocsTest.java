@@ -3,6 +3,8 @@ package com.quizbot.bot.rest;
 import com.quizbot.core.domain.Role;
 import com.quizbot.core.domain.Users;
 import com.quizbot.core.service.UserService;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.restassured.builder.RequestSpecBuilder;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.AfterAll;
@@ -31,10 +33,21 @@ import static org.springframework.restdocs.payload.PayloadDocumentation.response
 import static org.springframework.restdocs.restassured.RestAssuredRestDocumentation.document;
 import static org.springframework.restdocs.restassured.RestAssuredRestDocumentation.documentationConfiguration;
 
+
+
 class RestDocsTest {
 
     private static DisposableServer server;
     private static int port;
+
+    static final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    static {
+        meterRegistry.counter("llm.api.calls", "operation", "generate_hint", "status", "success").increment();
+        meterRegistry.counter("llm.api.calls", "operation", "generate_hint", "status", "error").increment();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        sample.stop(meterRegistry.timer("llm.api.duration", "operation", "generate_hint", "status", "success"));
+        meterRegistry.summary("llm.api.tokens", "operation", "generate_hint").record(512);
+    }
 
     private final ManualRestDocumentation restDocumentation = new ManualRestDocumentation();
     private RequestSpecification spec;
@@ -104,6 +117,35 @@ class RestDocsTest {
                 .then().statusCode(403);
     }
 
+    @Test
+    void getLlmStats_success() {
+        given(this.spec)
+                .header("X-API-KEY", "test-api-key")
+                .filter(document("get-llm-stats",
+                        requestHeaders(
+                                headerWithName("X-API-KEY").description("Ключ API администратора")
+                        ),
+                        responseFields(
+                                fieldWithPath("[].operation").description("Идентификатор операции LLM"),
+                                fieldWithPath("[].successCount").description("Количество успешных вызовов"),
+                                fieldWithPath("[].errorCount").description("Количество неудачных вызовов"),
+                                fieldWithPath("[].meanDurationMs").description("Среднее время выполнения (мс); 0 если вызовов не было"),
+                                fieldWithPath("[].maxDurationMs").description("Максимальное время выполнения (мс); 0 если вызовов не было"),
+                                fieldWithPath("[].totalTokens").description("Суммарное количество токенов; 0 если вызовов не было"),
+                                fieldWithPath("[].meanTokens").description("Среднее количество токенов за вызов; 0 если вызовов не было")
+                        )))
+                .when().get("http://localhost:" + port + "/llm-stats")
+                .then().statusCode(200);
+    }
+
+    @Test
+    void getLlmStats_forbidden() {
+        given(this.spec)
+                .filter(document("get-llm-stats-forbidden"))
+                .when().get("http://localhost:" + port + "/llm-stats")
+                .then().statusCode(403);
+    }
+
     @Configuration
     @EnableWebFlux
     static class TestConfig {
@@ -126,6 +168,11 @@ class RestDocsTest {
         @Bean
         AdminRestController adminRestController(UserService userService) {
             return new AdminRestController(userService, "test-api-key");
+        }
+
+        @Bean
+        LlmStatsController llmStatsController() {
+            return new LlmStatsController(meterRegistry, "test-api-key");
         }
     }
 }

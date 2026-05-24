@@ -1172,41 +1172,40 @@ public class MessageDispatcher {
     }
 
     private String handleGetLlmStats() {
+        var operations = new java.util.ArrayList<String>();
+        meterRegistry.find("llm.api.calls").counters().forEach(c -> {
+            String op = c.getId().getTag("operation");
+            if (op != null && !operations.contains(op)) operations.add(op);
+        });
+        Collections.sort(operations);
+
+        if (operations.isEmpty()) {
+            return "Вызовов ещё не было.";
+        }
+
         StringBuilder sb = new StringBuilder("Статистика LLM API:\n\n");
-
-        var calls = meterRegistry.find("llm.api.calls").counters().stream()
-                .sorted(Comparator.comparing(c -> c.getId().getTag("operation")))
-                .toList();
-        if (calls.isEmpty()) {
-            sb.append("Вызовов ещё не было.\n");
-        } else {
-            sb.append("Успешные вызовы:\n");
-            calls.forEach(c -> sb.append(String.format("  %s: %.0f\n",
-                    operationLabel(c.getId().getTag("operation")), c.count())));
+        for (String op : operations) {
+            double success = meterRegistry.find("llm.api.calls")
+                    .tag("operation", op).tag("status", "success")
+                    .counters().stream().mapToDouble(c -> c.count()).sum();
+            double error = meterRegistry.find("llm.api.calls")
+                    .tag("operation", op).tag("status", "error")
+                    .counters().stream().mapToDouble(c -> c.count()).sum();
+            sb.append(String.format("%s: успешно %.0f, ошибок %.0f\n",
+                    operationLabel(op), success, error));
+            var timer = meterRegistry.find("llm.api.duration")
+                    .tag("operation", op).tag("status", "success").timer();
+            if (timer != null && timer.count() > 0) {
+                sb.append(String.format("  Время: среднее %.0f мс, макс. %.0f мс\n",
+                        timer.mean(TimeUnit.MILLISECONDS), timer.max(TimeUnit.MILLISECONDS)));
+            }
+            var tokens = meterRegistry.find("llm.api.tokens").tag("operation", op).summary();
+            if (tokens != null && tokens.count() > 0) {
+                sb.append(String.format("  Токены: всего %.0f, среднее %.0f за вызов\n",
+                        tokens.totalAmount(), tokens.mean()));
+            }
+            sb.append("\n");
         }
-
-        var errors = meterRegistry.find("llm.api.errors").counters().stream()
-                .sorted(Comparator.comparing(c -> c.getId().getTag("operation")))
-                .toList();
-        if (!errors.isEmpty()) {
-            sb.append("\nОшибки:\n");
-            errors.forEach(c -> sb.append(String.format("  %s: %.0f\n",
-                    operationLabel(c.getId().getTag("operation")), c.count())));
-        }
-
-        var timers = meterRegistry.find("llm.api.duration").timers().stream()
-                .filter(t -> "success".equals(t.getId().getTag("status")) && t.count() > 0)
-                .sorted(Comparator.comparing(t -> t.getId().getTag("operation")))
-                .toList();
-        if (!timers.isEmpty()) {
-            sb.append("\nДлительность (успешные):\n");
-            timers.forEach(t -> sb.append(String.format("  %s: среднее %.0f мс, макс. %.0f мс (%d вызовов)\n",
-                    operationLabel(t.getId().getTag("operation")),
-                    t.mean(TimeUnit.MILLISECONDS),
-                    t.max(TimeUnit.MILLISECONDS),
-                    t.count())));
-        }
-
         return sb.toString().trim();
     }
 

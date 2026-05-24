@@ -26,3 +26,19 @@ include::{snippets}/get-users/response-fields.adoc[]
 
 include::{snippets}/get-users-forbidden/http-request.adoc[]
 include::{snippets}/get-users-forbidden/http-response.adoc[]
+
+== GET /llm-stats
+
+Возвращает статистику вызовов LLM API по операциям. Требует заголовок `X-API-KEY`.
+
+=== Успешный запрос
+
+include::{snippets}/get-llm-stats/http-request.adoc[]
+include::{snippets}/get-llm-stats/request-headers.adoc[]
+include::{snippets}/get-llm-stats/http-response.adoc[]
+include::{snippets}/get-llm-stats/response-fields.adoc[]
+
+=== Отказ в доступе (без API-ключа)
+
+include::{snippets}/get-llm-stats-forbidden/http-request.adoc[]
+include::{snippets}/get-llm-stats-forbidden/http-response.adoc[]

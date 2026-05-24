@@ -110,6 +110,9 @@ public class GigaChatClient implements LlmClient {
                             throw new RuntimeException("Неполный ответ от модели");
                         }
 
+                        if (meterRegistry != null) {
+                            meterRegistry.counter("llm.api.calls", "operation", "generate_question", "status", "success").increment();
+                        }
                         return Mono.just(Question.create(
                                 qNode.path("text").asText(),
                                 qNode.path("correctAnswer").asText(),
@@ -133,7 +136,7 @@ public class GigaChatClient implements LlmClient {
                     }
                     log.error("Failed to generate question: {}", e.getMessage());
                     if (meterRegistry != null) {
-                        meterRegistry.counter("llm.api.errors", "operation", "generate_question").increment();
+                        meterRegistry.counter("llm.api.calls", "operation", "generate_question", "status", "error").increment();
                     }
                     return new RuntimeException("Ошибка генерации вопроса: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()), e);
                 });
@@ -211,6 +214,9 @@ public class GigaChatClient implements LlmClient {
                                         node.path("newDifficulty").asInt()));
                             }
                         }
+                        if (meterRegistry != null) {
+                            meterRegistry.counter("llm.api.calls", "operation", "suggest_difficulty", "status", "success").increment();
+                        }
                         return updates;
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -219,7 +225,7 @@ public class GigaChatClient implements LlmClient {
                 .onErrorResume(e -> {
                     log.error("Failed to suggest difficulty updates: {}", e.getMessage());
                     if (meterRegistry != null) {
-                        meterRegistry.counter("llm.api.errors", "operation", "suggest_difficulty").increment();
+                        meterRegistry.counter("llm.api.calls", "operation", "suggest_difficulty", "status", "error").increment();
                     }
                     return Mono.just(new ArrayList<>());
                 });
@@ -234,7 +240,11 @@ public class GigaChatClient implements LlmClient {
                         if (!usage.isMissingNode() && usage.path("total_tokens").asInt() > 1000) {
                             throw new RuntimeException("Превышен лимит запросов к ИИ для этой операции");
                         }
-                        return root.path("choices").get(0).path("message").path("content").asText();
+                        String content = root.path("choices").get(0).path("message").path("content").asText();
+                        if (meterRegistry != null) {
+                            meterRegistry.counter("llm.api.calls", "operation", operation, "status", "success").increment();
+                        }
+                        return content;
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
@@ -245,7 +255,7 @@ public class GigaChatClient implements LlmClient {
                     }
                     log.warn("Simple LLM generation failed for operation {}: {}", operation, e.getMessage());
                     if (meterRegistry != null) {
-                        meterRegistry.counter("llm.api.errors", "operation", operation).increment();
+                        meterRegistry.counter("llm.api.calls", "operation", operation, "status", "error").increment();
                     }
                     return Mono.just("Не удалось сгенерировать текст (ошибка: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()) + ")");
                 });
@@ -263,7 +273,12 @@ public class GigaChatClient implements LlmClient {
                             long duration = System.currentTimeMillis() - startTime;
                             if (sample != null) {
                                 sample.stop(meterRegistry.timer("llm.api.duration", "operation", operation, "status", "success"));
-                                meterRegistry.counter("llm.api.calls", "operation", operation, "status", "success").increment();
+                                try {
+                                    int tokens = objectMapper.readTree(res).path("usage").path("total_tokens").asInt();
+                                    if (tokens > 0) {
+                                        meterRegistry.summary("llm.api.tokens", "operation", operation).record(tokens);
+                                    }
+                                } catch (Exception ignored) {}
                             }
                             return llmLogService.record(operation, prompt, res, "GigaChat", true, null, (int) duration)
                                     .thenReturn(res);

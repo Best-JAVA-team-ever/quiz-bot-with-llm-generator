@@ -13,6 +13,9 @@ dependencies {
     implementation("org.springframework:spring-webflux:$springVersion")
     implementation("io.projectreactor.netty:reactor-netty-http:1.2.0")
     implementation("ch.qos.logback:logback-classic:1.5.12")
+    implementation("jakarta.annotation:jakarta.annotation-api:3.0.0")
+    implementation("org.springframework.data:spring-data-mongodb:5.0.0")
+    implementation("io.micrometer:micrometer-core:1.14.2")
 }
 
 tasks.shadowJar {

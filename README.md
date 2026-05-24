@@ -9,7 +9,8 @@ An intelligent Telegram bot (<link>) for learning and running quizzes powered by
 - **Groups**: create groups, invite members, set group schedules, and view shared statistics.
 - **Scheduling**: automatic question delivery to users and groups via cron expressions.
 - **Admin panel**: full management of questions and topics directly through Telegram.
-- **REST API**: endpoints for health monitoring and user listing.
+- **REST API**: endpoints for health monitoring, user listing, and LLM usage statistics.
+- **LLM Metrics**: tracks successful/failed calls, duration, and token usage per operation — persisted across restarts.
 
 ---
 
@@ -64,6 +65,13 @@ An intelligent Telegram bot (<link>) for learning and running quizzes powered by
 #### Users
 - `\upgrade <ID>` — promote a user to administrator.
 
+#### LLM Statistics
+- `\get llm stats` — display LLM API usage statistics per operation:
+  - successful and failed call counts
+  - average and maximum execution time (ms) for successful calls
+  - total and average token usage per operation
+  - if no calls have been made yet, displays `Вызовов ещё не было`
+
 ---
 
 ## Deployment
@@ -117,6 +125,44 @@ docker run -d \
 
 - `GET /healthcheck` — public endpoint. Returns `status` (`UP`/`DOWN`) and a list of authors.
 - `GET /users` — list of registered users with ID, role, and registration date. Requires `X-API-KEY` header. Accessible to administrators only.
+- `GET /llm-stats` — LLM API usage statistics per operation. Requires `X-API-KEY` header. Returns a JSON array with the following fields per operation:
+
+  | Field | Description |
+  |---|---|
+  | `operation` | Operation identifier (`generate_question`, `generate_hint`, etc.) |
+  | `successCount` | Number of successful calls |
+  | `errorCount` | Number of failed calls |
+  | `meanDurationMs` | Average execution time in ms (`0` if no successful calls) |
+  | `maxDurationMs` | Maximum execution time in ms (`0` if no successful calls) |
+  | `totalTokens` | Total tokens used (`0` if no successful calls) |
+  | `meanTokens` | Average tokens per call (`0` if no successful calls) |
+
+
+---
+
+## REST Docs
+
+The project uses **Spring REST Docs** to generate API documentation from integration tests. Documentation is always in sync with the actual code — if a test fails, documentation is not generated.
+
+### Generating the documentation
+
+```bash
+./gradlew :bot:asciidoctor
+```
+
+This runs all REST Docs tests and compiles the HTML documentation. The result is available at:
+
+```
+bot/build/docs/asciidoc/index.html
+```
+
+### What is covered
+
+| Endpoint | Scenarios |
+|---|---|
+| `GET /healthcheck` | successful response (200) |
+| `GET /users` | successful response (200), access denied (403) |
+| `GET /llm-stats` | successful response (200), access denied (403) |
 
 ---
 
